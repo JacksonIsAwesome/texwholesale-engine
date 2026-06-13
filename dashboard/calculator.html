@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculator · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="calculator">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head">
+  <div class="eyebrow">Underwriting</div>
+  <h1>Deal calculator</h1>
+  <p>70% rule with live margin gauge. Adjust inputs to see numbers update instantly.</p>
+</div>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Inputs</h3>
+    <label class="field"><span class="lbl">Purchase price</span><input id="c-purchase" type="number" value="180000"></label>
+    <label class="field"><span class="lbl">Repair estimate</span><input id="c-repair" type="number" value="35000"></label>
+    <label class="field"><span class="lbl">After-repair value (ARV)</span><input id="c-arv" type="number" value="320000"></label>
+    <label class="field"><span class="lbl">Closing costs (%)</span><input id="c-closing" type="number" value="6" step="0.5"></label>
+    <label class="field"><span class="lbl">Assignment fee — <span id="c-fee-out">$10,000</span></span>
+      <input id="c-fee" type="range" min="0" max="50000" step="500" value="10000"></label>
+    <button class="btn amber" onclick="logDeal()">Log this deal</button>
+  </div>
+  <div class="card">
+    <h3>Result</h3>
+    <div class="gauge-wrap">
+      <div class="gauge">
+        <svg width="180" height="180" viewBox="0 0 180 180">
+          <circle class="ring-bg" cx="90" cy="90" r="75"></circle>
+          <circle class="ring-fg" id="gauge-ring" cx="90" cy="90" r="75"></circle>
+        </svg>
+        <div class="center"><div class="pct" id="gauge-pct">0%</div><div class="cap">flip margin</div></div>
+      </div>
+      <div id="margin-flag" style="font-weight:600;font-size:13.5px"></div>
+    </div>
+    <div style="margin-top:18px">
+      <div class="result-row"><span class="k">Max allowable offer (MAO)</span><span class="v" id="r-mao">—</span></div>
+      <div class="result-row"><span class="k">Net profit — assign</span><span class="v" id="r-assign">—</span></div>
+      <div class="result-row"><span class="k">Net profit — fix & list</span><span class="v" id="r-list">—</span></div>
+      <div class="result-row"><span class="k">Cash buyer target price</span><span class="v" id="r-target">—</span></div>
+      <div class="result-row"><span class="k">Est. closing costs</span><span class="v" id="r-closing">—</span></div>
+    </div>
+  </div>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>

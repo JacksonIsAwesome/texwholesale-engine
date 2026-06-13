@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leads · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="leads">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px">
+  <div>
+    <div class="eyebrow">Deal flow</div>
+    <h1>Leads</h1>
+    <p id="leads-count">…</p>
+  </div>
+  <div class="btn-row">
+    <select id="status-filter" style="width:auto">
+      <option value="">All statuses</option>
+      <option>New</option><option>Contacted</option><option>Offer Sent</option>
+      <option>Under Contract</option><option>Assigned</option><option>Closed</option>
+    </select>
+    <button class="btn amber" onclick="exportTopLeads()">Export top 50 (CSV)</button>
+  </div>
+</div>
+<div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Score</th><th>Property</th><th>Owner</th><th>Signals</th><th>Source</th><th>Est. value</th></tr></thead>
+    <tbody id="leads-body"></tbody>
+  </table>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>

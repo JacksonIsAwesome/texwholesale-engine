@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="settings">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head">
+  <div class="eyebrow">Configuration</div>
+  <h1>Settings</h1>
+  <p>Connection status. Keys live in your environment, never in the browser.</p>
+</div>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Integrations</h3>
+    <div id="integrations"></div>
+  </div>
+  <div class="card">
+    <h3>System</h3>
+    <div class="result-row"><span class="k">Database</span><span class="v" id="db-type">—</span></div>
+    <div class="result-row"><span class="k">Demo mode</span><span class="v" id="demo-state">—</span></div>
+    <h3 style="margin-top:20px">Enabled sources</h3>
+    <div id="sources-list"></div>
+  </div>
+</div>
+<div class="card" style="margin-top:16px">
+  <h3>About the scrapers</h3>
+  <p style="color:var(--text-muted);font-size:13.5px;line-height:1.6">
+    Every scraper ships disabled. Each one targets a third-party site whose terms of service and
+    robots rules you should confirm before turning it on — some (e.g. Zillow) prohibit scraping outright,
+    and licensed data feeds are the safer route. ATTOM integrations use a documented API and activate
+    automatically when <code>ATTOM_API_KEY</code> is set. Until you enable a source or demo mode, runs
+    return no records, which is expected.</p>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>

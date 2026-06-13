@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Templates · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="templates">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head">
+  <div class="eyebrow">Documents & outreach</div>
+  <h1>Templates</h1>
+  <p>Generate offer letters, assignment contracts, and outreach copy. Claude-written when a key is set, static otherwise.</p>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Offer letter (LOI)</h3>
+    <label class="field"><span class="lbl">Property address</span><input id="o-addr"></label>
+    <label class="field"><span class="lbl">Seller name</span><input id="o-seller"></label>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Purchase price</span><input id="o-price" type="number"></label>
+      <label class="field"><span class="lbl">Earnest money</span><input id="o-earnest" type="number" value="1000"></label>
+      <label class="field"><span class="lbl">Closing date</span><input id="o-closing" placeholder="2026-08-01"></label>
+      <label class="field"><span class="lbl">Buyer entity</span><input id="o-entity"></label>
+    </div>
+    <div class="btn-row"><button class="btn primary" onclick="genOffer()">Generate</button>
+      <button class="btn ghost sm" onclick="copyOut('o-out')">Copy</button></div>
+    <pre class="codebox" id="o-out" style="margin-top:14px">Your letter will appear here.</pre>
+  </div>
+
+  <div class="card">
+    <h3>Assignment contract</h3>
+    <label class="field"><span class="lbl">Property / seller address</span><input id="a-addr"></label>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Original contract price</span><input id="a-price" type="number"></label>
+      <label class="field"><span class="lbl">Assignment fee</span><input id="a-fee" type="number" value="10000"></label>
+      <label class="field"><span class="lbl">Assignee name</span><input id="a-assignee"></label>
+      <label class="field"><span class="lbl">Assignee entity</span><input id="a-entity"></label>
+    </div>
+    <label class="field"><span class="lbl">Closing date</span><input id="a-closing" placeholder="2026-08-01"></label>
+    <div class="btn-row"><button class="btn primary" onclick="genAssignment()">Generate</button>
+      <button class="btn ghost sm" onclick="copyOut('a-out')">Copy</button></div>
+    <pre class="codebox" id="a-out" style="margin-top:14px">Your contract will appear here.</pre>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3>Outreach copy</h3>
+  <div class="grid cols-3">
+    <label class="field"><span class="lbl">Type</span>
+      <select id="t-type"><option value="seller_letter">Seller letter</option>
+        <option value="call_script">Call script</option><option value="buyer_text">Buyer text blast</option></select></label>
+    <label class="field"><span class="lbl">Owner / buyer name</span><input id="t-owner"></label>
+    <label class="field"><span class="lbl">Your name</span><input id="t-investor"></label>
+    <label class="field"><span class="lbl">Property address</span><input id="t-addr"></label>
+    <label class="field"><span class="lbl">City</span><input id="t-city"></label>
+    <label class="field"><span class="lbl">Your phone</span><input id="t-phone"></label>
+    <label class="field"><span class="lbl">Your email</span><input id="t-email"></label>
+    <label class="field"><span class="lbl">ARV</span><input id="t-arv"></label>
+    <label class="field"><span class="lbl">Repairs</span><input id="t-repairs"></label>
+    <label class="field"><span class="lbl">Assign price</span><input id="t-price"></label>
+  </div>
+  <div class="btn-row"><button class="btn primary" onclick="genTemplate()">Generate</button>
+    <button class="btn ghost sm" onclick="copyOut('t-out')">Copy</button></div>
+  <pre class="codebox" id="t-out" style="margin-top:14px">Your copy will appear here.</pre>
+  <div class="note">Generated legal documents are drafts, not legal advice. Have a Texas real estate attorney review contracts before use.</div>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>

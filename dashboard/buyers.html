@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buyers · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="buyers">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px">
+  <div>
+    <div class="eyebrow">Disposition</div>
+    <h1>Buyers</h1>
+    <p id="buyers-count">…</p>
+  </div>
+  <button class="btn primary" onclick="openModal('buyer-modal')">+ Add buyer</button>
+</div>
+<div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Score</th><th>Buyer</th><th>Contact</th><th>Budget</th><th>City</th><th>Source</th></tr></thead>
+    <tbody id="buyers-body"></tbody>
+  </table>
+</div>
+
+<div class="modal-backdrop" id="buyer-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('buyer-modal')">&times;</button>
+    <h2>Add buyer</h2>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Name *</span><input id="b-name" placeholder="Lone Star REI LLC"></label>
+      <label class="field"><span class="lbl">Entity type</span><input id="b-entity" placeholder="LLC"></label>
+      <label class="field"><span class="lbl">Email</span><input id="b-email" type="email"></label>
+      <label class="field"><span class="lbl">Phone</span><input id="b-phone"></label>
+      <label class="field"><span class="lbl">City</span><input id="b-city"></label>
+      <label class="field"><span class="lbl">State</span><input id="b-state" value="TX"></label>
+      <label class="field"><span class="lbl">Budget min</span><input id="b-bmin" type="number"></label>
+      <label class="field"><span class="lbl">Budget max</span><input id="b-bmax" type="number"></label>
+      <label class="field"><span class="lbl">Preferred areas</span><input id="b-areas"></label>
+      <label class="field"><span class="lbl">Property types</span><input id="b-ptypes" placeholder="SFR, duplex"></label>
+    </div>
+    <label class="field"><span class="lbl">Notes</span><textarea id="b-notes"></textarea></label>
+    <div class="btn-row"><button class="btn primary" id="save-buyer">Save buyer</button>
+      <button class="btn ghost" onclick="closeModal('buyer-modal')">Cancel</button></div>
+    <div class="note">Name plus at least one of email or phone is required.</div>
+  </div>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>

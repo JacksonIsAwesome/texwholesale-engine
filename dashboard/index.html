@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="home">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head">
+  <div class="eyebrow">Acquisitions command center</div>
+  <h1>Overview</h1>
+  <p>Texas wholesaling pipeline — leads, buyers, and market signal in one place.</p>
+</div>
+
+<div class="grid cols-4" style="margin-bottom:18px">
+  <div class="card hoverable stat"><div class="label">Total leads</div><div class="value cyan" id="stat-leads">—</div><div class="sub">scored & ranked</div></div>
+  <div class="card hoverable stat"><div class="label">Hot leads</div><div class="value" id="stat-hot" style="color:var(--green)">—</div><div class="sub">score ≥ 70</div></div>
+  <div class="card hoverable stat"><div class="label">In pipeline</div><div class="value amber" id="stat-pipeline">—</div><div class="sub">not yet closed</div></div>
+  <div class="card hoverable stat"><div class="label">Cash buyers</div><div class="value" id="stat-buyers">—</div><div class="sub">on your list</div></div>
+</div>
+
+<div class="grid cols-2">
+  <div class="card" style="grid-column: span 1">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 style="margin:0">Texas metros</h3>
+      <span class="src-pill" id="market-source">…</span>
+    </div>
+    <div style="height:300px"><canvas id="marketChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Run ingestion</h3>
+    <p style="color:var(--text-muted);font-size:13.5px;margin-top:0">
+      Pulls from every enabled source across your target counties, scores each lead,
+      and (if a Claude key is set) re-ranks the top 50.</p>
+    <div class="btn-row">
+      <button class="btn primary" id="run-btn" onclick="runSources()">Run ingestion</button>
+      <a class="btn ghost" href="/dashboard/settings.html">Configure sources</a>
+    </div>
+    <div class="note">Scrapers are off by default. Enable them in your environment only after
+      reviewing each site's terms of service. Turn on <code>DEMO_MODE</code> to explore with sample data.</div>
+  </div>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Import · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="import">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head">
+  <div class="eyebrow">Data in</div>
+  <h1>Import</h1>
+  <p>Drop in a PropStream / county / buyer-list CSV. Headers are matched case-insensitively.</p>
+</div>
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Import properties</h3>
+    <p style="color:var(--text-muted);font-size:13.5px">Columns: address, city, state, zip, county, owner_name, est_value,
+      est_equity_pct, tax_delinquent, days_on_market, distress_signals (semicolon-separated).</p>
+    <input type="file" id="props-file" accept=".csv">
+  </div>
+  <div class="card">
+    <h3>Import buyers</h3>
+    <p style="color:var(--text-muted);font-size:13.5px">Columns: name, entity_type, email, phone, city, state,
+      budget_min, budget_max, preferred_areas, property_types.</p>
+    <input type="file" id="buyers-file" accept=".csv">
+  </div>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>
