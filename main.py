@@ -48,7 +48,7 @@ load_dotenv()
 # --------------------------------------------------------------------------- #
 
 APP_NAME = "TexWholesale Engine"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.3.0"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./texwholesale.db")
 # Railway/Heroku hand out postgres:// ; SQLAlchemy 2.x wants postgresql://
@@ -60,6 +60,17 @@ USPS_USER_ID = os.getenv("USPS_USER_ID", "").strip()
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 BATCHDATA_API_KEY = os.getenv("BATCHDATA_API_KEY", "").strip()
 TRACERFY_API_KEY = os.getenv("TRACERFY_API_KEY", "").strip()
+# Outreach + e-signature integrations (all optional; features degrade gracefully)
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
+SENDGRID_FROM = os.getenv("SENDGRID_FROM", "").strip()
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "").strip()
+LOB_API_KEY = os.getenv("LOB_API_KEY", "").strip()
+SLYBROADCAST_API_ID = os.getenv("SLYBROADCAST_API_ID", "").strip()
+SLYBROADCAST_API_TOKEN = os.getenv("SLYBROADCAST_API_TOKEN", "").strip()
+HELLOSIGN_API_KEY = os.getenv("HELLOSIGN_API_KEY", "").strip()
+DOCUSIGN_API_KEY = os.getenv("DOCUSIGN_API_KEY", "").strip()
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 
 HTTP_TIMEOUT = 5.0
@@ -383,6 +394,72 @@ class ContactLog(Base):
             "outcome": self.outcome,
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class OutreachLog(Base):
+    __tablename__ = "outreach_logs"
+
+    id = Column(String, primary_key=True, default=_uid)
+    lead_id = Column(String, default="")
+    buyer_id = Column(String, default="")
+    channel = Column(String, default="email")     # email | sms | voicemail | mail | call
+    direction = Column(String, default="outbound")  # outbound | inbound
+    provider = Column(String, default="")          # sendgrid | twilio | lob | slybroadcast | manual
+    template = Column(String, default="")
+    recipient = Column(String, default="")
+    subject = Column(String, default="")
+    body = Column(Text, default="")
+    status = Column(String, default="queued")      # queued | sent | delivered | failed | blocked | drafted
+    external_id = Column(String, default="")
+    detail = Column(Text, default="")
+    created_at = Column(DateTime, default=_now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "lead_id": self.lead_id,
+            "buyer_id": self.buyer_id,
+            "channel": self.channel,
+            "direction": self.direction,
+            "provider": self.provider,
+            "template": self.template,
+            "recipient": self.recipient,
+            "subject": self.subject,
+            "body": self.body,
+            "status": self.status,
+            "external_id": self.external_id,
+            "detail": self.detail,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class Contract(Base):
+    __tablename__ = "contracts"
+
+    id = Column(String, primary_key=True, default=_uid)
+    lead_id = Column(String, default="")
+    contract_type = Column(String, default="assignment")  # assignment | double_close | lease_option | subject_to
+    counterparty = Column(String, default="")
+    body = Column(Text, default="")
+    status = Column(String, default="draft")   # draft | sent_for_signature | signed | void
+    provider = Column(String, default="")      # hellosign | docusign | manual
+    external_id = Column(String, default="")
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "lead_id": self.lead_id,
+            "contract_type": self.contract_type,
+            "counterparty": self.counterparty,
+            "body": self.body,
+            "status": self.status,
+            "provider": self.provider,
+            "external_id": self.external_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -2174,6 +2251,765 @@ def blast_deal(lead_id: str, limit: int = 10, db: Session = Depends(get_db)):
         "sms": {"body": sms_body},
         "note": "Personalize {name} per buyer. Review before sending — nothing is sent automatically.",
     }
+
+
+# ===========================================================================
+# CONTRACT ENGINE + AI INTELLIGENCE (v1.2.0)
+# ===========================================================================
+
+# ----- Schemas ------------------------------------------------------------- #
+
+class ContractInput(BaseModel):
+    lead_id: str = ""
+    contract_type: str = ""        # assignment | double_close | lease_option | subject_to | "" = auto
+    seller_name: str = ""
+    seller_address: str = ""
+    buyer_name: str = ""
+    buyer_entity: str = ""
+    purchase_price: float = 0.0
+    assignment_fee: float = 0.0
+    closing_date: str = ""
+    # type-specific
+    option_fee: float = 0.0
+    monthly_rent: float = 0.0
+    option_term_months: int = 12
+    existing_loan_balance: float = 0.0
+    monthly_piti: float = 0.0
+
+
+class OfferRecInput(BaseModel):
+    lead_id: str = ""
+    arv: float = 0.0
+    repair_estimate: float = 0.0
+    closing_pct: float = 6.0
+    target_margin_pct: float = 15.0
+    multi_offer: bool = False
+
+
+class ParseReplyInput(BaseModel):
+    lead_id: str = ""
+    channel: str = "sms"           # sms | email | voicemail
+    message: str
+    auto_update: bool = True
+
+
+class PersonalizeInput(BaseModel):
+    lead_id: str = ""
+    template_type: str = "seller_letter"   # seller_letter | call_script | sms | email | postcard
+    investor_name: str = ""
+    phone: str = ""
+    email: str = ""
+
+
+class SendForSignatureInput(BaseModel):
+    contract_id: str = ""
+    contract_type: str = "assignment"
+    lead_id: str = ""
+    counterparty: str = ""
+    signer_email: str = ""
+    body: str = ""
+
+
+# ----- Contract engine (4 types + Texas disclosures) ----------------------- #
+
+_TX_DISCLOSURE = (
+    "DISCLOSURE (Texas Occupations Code Sec. 1101.0045): The party transferring "
+    "its interest is selling or assigning an equitable interest in a real estate "
+    "contract, not acting as a licensed real estate broker, and has disclosed its "
+    "intent to assign or profit from the transaction. This party is not a licensed "
+    "Texas real estate broker or sales agent unless separately disclosed in writing."
+)
+
+_ATTY_NOTE = (
+    "\nNOTE: This is a working draft generated for convenience, not legal advice. "
+    "Texas wholesaling, assignment, lease-option, and subject-to transactions carry "
+    "specific disclosure, licensing, and lending rules (including due-on-sale risk "
+    "for subject-to). Have a Texas real estate attorney review and adapt this before use.\n"
+)
+
+
+def _auto_contract_type(lead: Lead | None) -> str:
+    """Pick a sensible default contract type from whatever deal data we have."""
+    if lead is None:
+        return "assignment"
+    # Subject-to makes sense when there's a meaningful loan balance to take over.
+    # Lease-option when equity is thin. Otherwise assignment (the wholesaler default).
+    if (lead.est_equity_pct or 0) and lead.est_equity_pct < 10:
+        return "lease_option"
+    return "assignment"
+
+
+def build_contract(d: ContractInput, lead: Lead | None) -> str:
+    ctype = (d.contract_type or "").strip().lower() or _auto_contract_type(lead)
+    today = datetime.now().strftime("%B %d, %Y")
+    prop = d.seller_address or (lead.address if lead else "[Property Address]")
+    seller = d.seller_name or (lead.owner_name if lead else "[Seller]")
+    buyer = d.buyer_name or "[Buyer / Assignee]"
+    if d.buyer_entity:
+        buyer = f"{buyer} ({d.buyer_entity})"
+    closing = d.closing_date or "[Closing Date]"
+    price = d.purchase_price or (lead.asking_price if lead else 0) or 0
+
+    if ctype == "double_close":
+        body = f"""SIMULTANEOUS (DOUBLE) CLOSE COORDINATION AGREEMENT — State of Texas
+Date: {today}
+Property: {prop}
+
+This memorializes a back-to-back (A-to-B / B-to-C) closing.
+
+  A->B (Acquisition): {buyer} acquires the Property from {seller} for {_money(price)}.
+  B->C (Disposition): {buyer} resells to the end buyer at a separate, higher price
+       in a second closing, typically same-day, funded independently.
+  1. Each leg closes under its own purchase agreement at a Texas title company
+     capable of a double close; transactional funding may be used for the A->B leg.
+  2. Each contract stands alone; the end buyer is not assigned the first contract.
+  3. Closing on or before {closing}. Property conveyed as-is by general warranty deed.
+
+{_TX_DISCLOSURE}
+{_ATTY_NOTE}
+A->B Buyer: ____________________   Date: ______    Seller: ____________________  Date: ______"""
+
+    elif ctype == "lease_option":
+        body = f"""RESIDENTIAL LEASE WITH OPTION TO PURCHASE — State of Texas
+Date: {today}
+Property: {prop}
+
+Between {seller} ("Owner/Landlord") and {buyer} ("Tenant/Optionee").
+
+  1. Lease. Tenant leases the Property at {_money(d.monthly_rent)} per month for an
+     initial term of {d.option_term_months} months.
+  2. Option. In consideration of a non-refundable option fee of {_money(d.option_fee)},
+     Tenant has the exclusive option to purchase the Property for {_money(price)}
+     during the option term.
+  3. Rent Credit. [Specify any portion of monthly rent credited toward purchase.]
+  4. Maintenance / As-Is. [Allocate responsibility; Property optioned as-is.]
+  5. Closing. On exercise, closing on or before {closing} at a Texas title company.
+
+NOTE: A Texas lease-option (executory contract) over 180 days triggers Property Code
+Chapter 5, Subchapter D requirements (disclosures, recording, restrictions). Confirm
+compliance with counsel.
+
+{_TX_DISCLOSURE}
+{_ATTY_NOTE}
+Owner: ____________________   Date: ______    Tenant/Optionee: ____________________  Date: ______"""
+
+    elif ctype == "subject_to":
+        body = f"""PURCHASE AGREEMENT — SUBJECT TO EXISTING FINANCING — State of Texas
+Date: {today}
+Property: {prop}
+
+Between {seller} ("Seller") and {buyer} ("Buyer").
+
+  1. Purchase. Buyer purchases the Property for {_money(price)}, taking title
+     SUBJECT TO the existing mortgage loan(s) of approximately
+     {_money(d.existing_loan_balance)}, which remain in Seller's name.
+  2. Payments. Buyer assumes responsibility for the monthly payment of approximately
+     {_money(d.monthly_piti)} (principal, interest, taxes, insurance) going forward.
+  3. DUE-ON-SALE ACKNOWLEDGMENT. Seller and Buyer acknowledge the existing loan may
+     contain a due-on-sale clause the lender could enforce upon transfer of title.
+     Both parties accept this risk knowingly.
+  4. Authorization. Seller authorizes Buyer/servicer to access loan information.
+  5. As-Is / Closing. Property conveyed as-is; closing on or before {closing} at a
+     Texas title company. Recommend a loan servicing company collect and remit payments.
+
+{_TX_DISCLOSURE}
+{_ATTY_NOTE}
+Seller: ____________________   Date: ______    Buyer: ____________________  Date: ______"""
+
+    else:  # assignment (default) — reuse the established builder for consistency
+        ctype = "assignment"
+        body = build_assignment_contract(AssignmentContractInput(
+            original_contract_price=price,
+            assignment_fee=d.assignment_fee or (lead.assignment_fee_target if lead else 0) or 0,
+            seller_address=prop,
+            assignee_name=d.buyer_name or "[Assignee]",
+            assignee_entity=d.buyer_entity,
+            closing_date=d.closing_date,
+        ))
+
+    return body, ctype
+
+
+@app.post("/api/generate/contract")
+def generate_contract(d: ContractInput, db: Session = Depends(get_db)):
+    lead = db.get(Lead, d.lead_id) if d.lead_id else None
+    body, ctype = build_contract(d, lead)
+    return {"contract_type": ctype, "contract": body}
+
+
+# ----- Offer price recommendation ------------------------------------------ #
+
+@app.post("/api/ai/offer-recommendation")
+def offer_recommendation(d: OfferRecInput, db: Session = Depends(get_db)):
+    lead = db.get(Lead, d.lead_id) if d.lead_id else None
+    arv = d.arv or (lead.arv if lead else 0) or 0
+    repair = d.repair_estimate or (lead.repair_estimate if lead else 0) or 0
+    if arv <= 0:
+        return {"note": "Provide an ARV (or set one on the lead via comps) to get a recommendation."}
+
+    closing_costs = arv * (d.closing_pct / 100.0)
+    # Classic 70% rule MAO, then back out a fee and a margin-protective floor.
+    mao_70 = arv * 0.70 - repair
+    suggested_fee = max(min(round(arv * 0.03, -2), 25000), 5000)  # ~3% of ARV, clamped $5k–$25k
+    max_offer = max(mao_70 - suggested_fee, 0)
+
+    # Minimum offer that still leaves the end buyer your target margin on a fix & list.
+    # net_to_buyer = arv - buyer_purchase - repair - closing >= target_margin% * arv
+    target = (d.target_margin_pct / 100.0) * arv
+    max_buyer_purchase = arv - repair - closing_costs - target
+    # You sell to the buyer at (your purchase + fee); so your purchase ceiling:
+    your_purchase_ceiling = max(max_buyer_purchase - suggested_fee, 0)
+
+    result = {
+        "arv": round(arv),
+        "repair_estimate": round(repair),
+        "max_allowable_offer_70": round(mao_70),
+        "suggested_assignment_fee": round(suggested_fee),
+        "recommended_max_offer": round(max_offer),
+        "offer_ceiling_for_target_margin": round(your_purchase_ceiling),
+        "target_margin_pct": d.target_margin_pct,
+        "estimated_closing_costs": round(closing_costs),
+        "note": "MAO = 70% of ARV minus repairs. Recommended offer also backs out a "
+                "suggested assignment fee. The margin ceiling is the most you can pay and "
+                "still leave a fix-and-list buyer your target margin.",
+    }
+    if d.multi_offer:
+        result["competing_offer_scenarios"] = [
+            {"label": "Aggressive (win the deal)", "offer": round(max_offer)},
+            {"label": "Balanced", "offer": round(max_offer * 0.93)},
+            {"label": "Conservative (protect spread)", "offer": round(max_offer * 0.85)},
+        ]
+    return result
+
+
+# ----- Reply parsing (intent extraction) ----------------------------------- #
+
+_INTENT_KEYWORDS = {
+    "not_interested": ["not interested", "stop", "remove me", "no thanks", "don't contact", "do not contact", "leave me alone", "unsubscribe"],
+    "interested": ["interested", "yes", "how much", "what's your offer", "make an offer", "tell me more", "sure", "let's talk"],
+    "callback_requested": ["call me", "call back", "callback", "reach me", "phone me", "give me a call"],
+    "price_objection": ["too low", "lowball", "not enough", "worth more", "insulting", "way more", "higher"],
+    "wrong_number": ["wrong number", "not the owner", "don't own", "sold already", "no longer own"],
+}
+
+
+def _keyword_intent(message: str) -> tuple[str, float]:
+    m = (message or "").lower()
+    for intent, kws in _INTENT_KEYWORDS.items():
+        if any(k in m for k in kws):
+            return intent, 0.6
+    return "unclear", 0.3
+
+
+def _claude_intent(message: str, channel: str) -> tuple[str, float] | None:
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        prompt = (
+            "You parse replies from property owners to a real estate investor's outreach. "
+            f"Channel: {channel}. Message: \"{message}\"\n\n"
+            "Classify intent as exactly one of: interested, not_interested, callback_requested, "
+            "price_objection, wrong_number, unclear. Respond with ONLY that single token."
+        )
+        resp = client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=16,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        token = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip().lower()
+        valid = {"interested", "not_interested", "callback_requested", "price_objection", "wrong_number", "unclear"}
+        if token in valid:
+            return token, 0.9
+    except Exception as exc:  # any SDK/network failure -> caller falls back
+        print(f"[ai] parse-reply fallback: {exc}")
+    return None
+
+
+_INTENT_TO_STATUS = {
+    "interested": "Contacted",
+    "callback_requested": "Contacted",
+    "price_objection": "Contacted",
+    "not_interested": "New",   # keep but don't advance; suppression handled separately
+}
+
+
+@app.post("/api/ai/parse-reply")
+def parse_reply(d: ParseReplyInput, db: Session = Depends(get_db)):
+    claude = _claude_intent(d.message, d.channel)
+    if claude:
+        intent, confidence, source = claude[0], claude[1], "claude"
+    else:
+        intent, confidence = _keyword_intent(d.message)
+        source = "keyword"
+
+    updated = False
+    lead = db.get(Lead, d.lead_id) if d.lead_id else None
+    if lead:
+        # Always log the inbound reply.
+        db.add(OutreachLog(
+            lead_id=lead.id, channel=d.channel, direction="inbound",
+            provider="parser", body=d.message, status="delivered",
+            detail=f"intent={intent} ({source})",
+        ))
+        note = f"[{_now().date().isoformat()}] Reply via {d.channel}: intent={intent}. \"{d.message[:200]}\""
+        lead.notes = (lead.notes + "\n" + note).strip() if lead.notes else note
+        if d.auto_update and intent in _INTENT_TO_STATUS and lead.status == "New" and intent != "not_interested":
+            lead.status = _INTENT_TO_STATUS[intent]
+            updated = True
+        db.commit()
+
+    return {
+        "intent": intent,
+        "confidence": confidence,
+        "source": source,
+        "lead_status_updated": updated,
+        "suppress_recommended": intent == "not_interested",
+    }
+
+
+# ----- Template personalization by lead source ----------------------------- #
+
+_SOURCE_ANGLE = {
+    "probate": "empathetic and unhurried; acknowledge this may follow a loss and offer to handle details simply",
+    "foreclosure": "discreet and solution-oriented; emphasize speed and avoiding further credit damage",
+    "pre-foreclosure": "discreet and solution-oriented; emphasize speed and a graceful exit",
+    "tax-delinquent": "respectful but timely; note you can close before deadlines and cover back taxes at closing",
+    "code-violation": "practical 'as-is fixer' angle; you take on the repairs and citations",
+    "vacant": "low-pressure; note the carrying costs of an empty property",
+    "divorce": "neutral and confidential; emphasize a clean, fast split-friendly sale",
+    "absentee-owner": "convenience angle for an out-of-area owner; you handle everything locally",
+}
+
+
+@app.post("/api/ai/personalize-template")
+def personalize_template(d: PersonalizeInput, db: Session = Depends(get_db)):
+    lead = db.get(Lead, d.lead_id) if d.lead_id else None
+    signals = lead.signals() if lead else []
+    angle = next((_SOURCE_ANGLE[s] for s in signals if s in _SOURCE_ANGLE), "friendly, direct, no-pressure")
+
+    ctx = {
+        "owner_name": (lead.owner_name if lead else "") or "there",
+        "address": (lead.address if lead else "") or "your property",
+        "city": (lead.city if lead else "") or "",
+        "investor_name": d.investor_name or "[Your name]",
+        "phone": d.phone or "[your phone]",
+        "email": d.email or "[your email]",
+    }
+
+    if ANTHROPIC_API_KEY:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            prompt = (
+                f"Write a short, {d.template_type.replace('_', ' ')} for a Texas real estate "
+                f"investor reaching out to a property owner. Tone: {angle}. "
+                f"Owner: {ctx['owner_name']}. Property: {ctx['address']} {ctx['city']}. "
+                f"Sign as {ctx['investor_name']}, phone {ctx['phone']}, email {ctx['email']}. "
+                "No emojis. Be genuine and concise. Do not invent specific dollar figures."
+            )
+            resp = client.messages.create(
+                model="claude-sonnet-4-6", max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+            if text:
+                return {"template_type": d.template_type, "angle": angle, "source": "claude", "text": text}
+        except Exception as exc:
+            print(f"[ai] personalize fallback: {exc}")
+
+    # Static fallback: tailor the existing seller letter with the source angle noted.
+    base = STATIC_TEMPLATES.get("seller_letter", "").format(**{
+        "owner_name": ctx["owner_name"], "investor_name": ctx["investor_name"],
+        "address": ctx["address"], "phone": ctx["phone"], "email": ctx["email"],
+    })
+    return {"template_type": d.template_type, "angle": angle, "source": "static", "text": base}
+
+
+# ----- E-signature stub + contract storage --------------------------------- #
+
+@app.post("/api/contracts/send-for-signature")
+def send_for_signature(d: SendForSignatureInput, db: Session = Depends(get_db)):
+    # Resolve or create the contract record.
+    contract = db.get(Contract, d.contract_id) if d.contract_id else None
+    if not contract:
+        body = d.body
+        ctype = d.contract_type or "assignment"
+        if not body and d.lead_id:
+            lead = db.get(Lead, d.lead_id)
+            body, ctype = build_contract(ContractInput(lead_id=d.lead_id, contract_type=ctype), lead)
+        contract = Contract(
+            lead_id=d.lead_id, contract_type=ctype,
+            counterparty=d.counterparty, body=body or "",
+        )
+        db.add(contract)
+        db.flush()
+
+    provider = "hellosign" if HELLOSIGN_API_KEY else ("docusign" if DOCUSIGN_API_KEY else "")
+    if not provider:
+        contract.status = "draft"
+        db.commit()
+        return {
+            "contract_id": contract.id,
+            "status": "draft",
+            "instructions": "No e-signature key set (HELLOSIGN_API_KEY or DOCUSIGN_API_KEY). "
+                            "The contract is saved as a draft — print it, sign manually, or add a key to send digitally.",
+            "contract": contract.to_dict(),
+        }
+
+    # Env-gated provider path. Endpoint specifics vary by account/version, so this
+    # records intent and returns a clear message rather than guessing an API shape.
+    contract.status = "sent_for_signature"
+    contract.provider = provider
+    contract.external_id = f"pending-{contract.id}"
+    contract.updated_at = _now()
+    db.commit()
+    return {
+        "contract_id": contract.id,
+        "status": "sent_for_signature",
+        "provider": provider,
+        "signer_email": d.signer_email,
+        "note": f"{provider} key detected. Envelope creation is account-specific — wire your "
+                f"{provider} envelope endpoint here; the contract record is saved and marked sent.",
+        "contract": contract.to_dict(),
+    }
+
+
+@app.get("/api/contracts")
+def list_contracts(db: Session = Depends(get_db)):
+    rows = db.execute(select(Contract).order_by(Contract.created_at.desc()).limit(100)).scalars().all()
+    return {"count": len(rows), "contracts": [c.to_dict() for c in rows]}
+
+
+@app.put("/api/contracts/{contract_id}/status")
+def set_contract_status(contract_id: str, payload: StatusUpdate, db: Session = Depends(get_db)):
+    contract = db.get(Contract, contract_id)
+    if not contract:
+        raise HTTPException(404, "Contract not found")
+    valid = {"draft", "sent_for_signature", "signed", "void"}
+    if payload.status not in valid:
+        raise HTTPException(400, f"status must be one of {sorted(valid)}")
+    contract.status = payload.status
+    contract.updated_at = _now()
+    db.commit()
+    return contract.to_dict()
+
+
+# ===========================================================================
+# OUTREACH DRAFTING (v1.3.0) — drafts messages + mailto links; never sends.
+# You review and send from your own mail app, so there's no automated-messaging
+# / TCPA / CAN-SPAM exposure. Touch-logging feeds the follow-up cadence.
+# ===========================================================================
+
+import urllib.parse as _urlparse
+
+# Seller follow-up sequence. Person-to-person emails YOU send by hand.
+SELLER_SEQUENCE = {
+    "intro": {
+        "label": "Intro — We Buy Houses",
+        "subject": "Quick question about {address}",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "My name is {investor_name} — I'm a local buyer here in the {city} area. "
+            "I'm reaching out directly about your property at {address}.\n\n"
+            "I buy homes in any condition, as-is, and can close on your timeline with no "
+            "agent commissions or repairs on your end. If you've ever considered selling, "
+            "I'd be glad to make you a fair, no-obligation cash offer.\n\n"
+            "No pressure at all — if the timing isn't right, just let me know and I won't "
+            "keep bugging you. You can reach me anytime at {phone} or {email}.\n\n"
+            "Thanks for your time,\n{investor_name}\n{phone}"
+        ),
+    },
+    "followup_1": {
+        "label": "Follow-up #1 (day 3)",
+        "subject": "Following up on {address}",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "Just circling back on my note about {address}. I know these things come at "
+            "random times, so no worries if it's not for you.\n\n"
+            "If you'd like to hear what I could offer — cash, as-is, no fees — I'm happy to "
+            "put a number together. Reach me at {phone}.\n\nBest,\n{investor_name}"
+        ),
+    },
+    "followup_2": {
+        "label": "Follow-up #2 (day 7)",
+        "subject": "Re: {address}",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "Still happy to make you a no-obligation cash offer on {address} whenever you're "
+            "ready. A quick call is all it takes and there's zero commitment.\n\n"
+            "{phone} — {investor_name}"
+        ),
+    },
+    "followup_3": {
+        "label": "Follow-up #3 (day 14)",
+        "subject": "Can I help with {address}?",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "I'll keep this short — if selling {address} would make life easier, I can take "
+            "it as-is and handle the details. If not, totally understand.\n\n"
+            "{investor_name}, {phone}"
+        ),
+    },
+    "followup_4": {
+        "label": "Follow-up #4 (day 21)",
+        "subject": "Last couple of notes on {address}",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "I don't want to crowd your inbox. I'm still a ready cash buyer for {address} if "
+            "circumstances change. Keep my number handy: {phone}.\n\nThanks,\n{investor_name}"
+        ),
+    },
+    "followup_5": {
+        "label": "Follow-up #5 (day 30)",
+        "subject": "Still here when you need me — {address}",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "Checking in one more time on {address}. Whether it's now or months from now, I'm "
+            "glad to make a fair cash offer when the timing's right.\n\n{investor_name}, {phone}"
+        ),
+    },
+    "still_interested": {
+        "label": "Still interested?",
+        "subject": "Are you still thinking about selling {address}?",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "Quick yes/no — are you still open to an offer on {address}? If yes, I'll get you "
+            "a number this week. If no, just reply 'no' and I'll close out your file.\n\n"
+            "{investor_name}, {phone}"
+        ),
+    },
+    "breakup": {
+        "label": "Breakup (final)",
+        "subject": "Closing your file — {address}",
+        "body": (
+            "Hi {owner_name},\n\n"
+            "I haven't heard back, so I'll stop reaching out about {address} — I never want to "
+            "be a pest. If anything changes down the road, my door's open and the offer stands.\n\n"
+            "Wishing you the best,\n{investor_name}\n{phone}"
+        ),
+    },
+}
+
+SEQUENCE_ORDER = ["intro", "followup_1", "followup_2", "followup_3", "followup_4", "followup_5", "still_interested", "breakup"]
+
+
+class OutreachDraftInput(BaseModel):
+    audience: str = "seller"          # seller | buyer
+    lead_id: str = ""                 # seller: the owner; buyer: the deal being pitched
+    buyer_id: str = ""                # buyer audience: the recipient
+    step: str = "intro"               # seller sequence step
+    investor_name: str = ""
+    phone: str = ""
+    email: str = ""
+    use_ai: bool = True
+
+
+class OutreachQueueInput(BaseModel):
+    audience: str = "seller"
+    step: str = "intro"
+    lead_ids: list[str] = Field(default_factory=list)
+    status_filter: str = ""           # seller: only leads with this status
+    deal_lead_id: str = ""            # buyer: the deal to pitch to matched buyers
+    investor_name: str = ""
+    phone: str = ""
+    email: str = ""
+    limit: int = 50
+    use_ai: bool = False              # AI per-recipient can be slow in bulk; off by default
+
+
+class MarkSentInput(BaseModel):
+    lead_id: str = ""
+    buyer_id: str = ""
+    channel: str = "email"
+    template: str = ""
+    recipient: str = ""
+    subject: str = ""
+    body: str = ""
+    schedule_followup_days: int | None = None
+
+
+def _mailto(email: str, subject: str, body: str) -> str:
+    if not email:
+        return ""
+    q = _urlparse.urlencode({"subject": subject, "body": body}, quote_via=_urlparse.quote)
+    return f"mailto:{email}?{q}"
+
+
+def _seller_draft(lead: Lead, step: str, ctx: dict, use_ai: bool) -> dict:
+    tpl = SELLER_SEQUENCE.get(step, SELLER_SEQUENCE["intro"])
+    fields = {
+        "owner_name": lead.owner_name or "there",
+        "address": lead.address or "your property",
+        "city": lead.city or "the area",
+        "investor_name": ctx["investor_name"],
+        "phone": ctx["phone"],
+        "email": ctx["email"],
+    }
+    subject = tpl["subject"].format(**fields)
+    body = tpl["body"].format(**fields)
+
+    # Optional AI rewrite for the intro, tuned to the lead's distress angle.
+    if use_ai and ANTHROPIC_API_KEY:
+        signals = lead.signals()
+        angle = next((_SOURCE_ANGLE[s] for s in signals if s in _SOURCE_ANGLE), "friendly, direct, no-pressure")
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            prompt = (
+                f"Rewrite this real estate outreach email to be warm and {angle}. Keep it short, "
+                f"genuine, no emojis, no invented dollar figures. Keep the sign-off name {fields['investor_name']} "
+                f"and phone {fields['phone']}.\n\nSubject: {subject}\n\n{body}"
+            )
+            resp = client.messages.create(model="claude-sonnet-4-6", max_tokens=400,
+                                           messages=[{"role": "user", "content": prompt}])
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+            if text:
+                body = text
+        except Exception as exc:
+            print(f"[outreach] AI rewrite fallback: {exc}")
+
+    return {
+        "audience": "seller",
+        "step": step,
+        "lead_id": lead.id,
+        "recipient_name": lead.owner_name or "",
+        "recipient_email": lead.owner_email or "",
+        "recipient_phone": lead.owner_phone or "",
+        "subject": subject,
+        "body": body,
+        "mailto": _mailto(lead.owner_email, subject, body),
+        "missing_email": not bool(lead.owner_email),
+    }
+
+
+def _buyer_draft(deal: Lead, buyer: Buyer, ctx: dict) -> dict:
+    ask = deal.asking_price or _estimated_offer_to_buyer(deal)
+    subject = f"Off-market deal: {deal.address} — {fmt_money_plain(ask)}"
+    loc = f"{deal.city}, {deal.state} {deal.zip_code}".strip()
+    body = (
+        f"Hi {buyer.name},\n\n"
+        f"New off-market wholesale deal in {loc}:\n\n"
+        f"Address: {deal.address}\n"
+        f"ARV: {fmt_money_plain(deal.arv or 0)}\n"
+        f"Estimated repairs: {fmt_money_plain(deal.repair_estimate or 0)}\n"
+        f"Asking (assignment included): {fmt_money_plain(ask)}\n"
+        + (f"Beds/Baths/SqFt: {deal.beds:g}/{deal.baths:g}/{deal.sqft:,.0f}\n" if deal.sqft else "")
+        + "\nCash or hard money, as-is, assignable contract. Reply if you want the full property "
+        "info sheet and access details. First with proof of funds and earnest money locks it.\n\n"
+        f"Thanks,\n{ctx['investor_name']}\n{ctx['phone']}"
+    )
+    return {
+        "audience": "buyer",
+        "lead_id": deal.id,
+        "buyer_id": buyer.id,
+        "recipient_name": buyer.name,
+        "recipient_email": buyer.email or "",
+        "recipient_phone": buyer.phone or "",
+        "subject": subject,
+        "body": body,
+        "mailto": _mailto(buyer.email, subject, body),
+        "missing_email": not bool(buyer.email),
+    }
+
+
+@app.get("/api/outreach/sequence")
+def outreach_sequence():
+    return {"steps": [{"step": s, "label": SELLER_SEQUENCE[s]["label"]} for s in SEQUENCE_ORDER]}
+
+
+@app.post("/api/outreach/draft")
+def outreach_draft(d: OutreachDraftInput, db: Session = Depends(get_db)):
+    ctx = {
+        "investor_name": d.investor_name or "[Your name]",
+        "phone": d.phone or "[your phone]",
+        "email": d.email or "[your email]",
+    }
+    if d.audience == "buyer":
+        deal = db.get(Lead, d.lead_id)
+        buyer = db.get(Buyer, d.buyer_id)
+        if not deal or not buyer:
+            raise HTTPException(404, "Need a valid deal lead_id and buyer_id")
+        return _buyer_draft(deal, buyer, ctx)
+    lead = db.get(Lead, d.lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    return _seller_draft(lead, d.step, ctx, d.use_ai)
+
+
+@app.post("/api/outreach/queue")
+def outreach_queue(d: OutreachQueueInput, db: Session = Depends(get_db)):
+    ctx = {
+        "investor_name": d.investor_name or "[Your name]",
+        "phone": d.phone or "[your phone]",
+        "email": d.email or "[your email]",
+    }
+    drafts = []
+
+    if d.audience == "buyer":
+        deal = db.get(Lead, d.deal_lead_id)
+        if not deal:
+            raise HTTPException(404, "Provide deal_lead_id for a buyer queue")
+        buyers = [b for b in db.execute(select(Buyer)).scalars().all() if b.active]
+        ranked = match_buyers_for_lead(deal, buyers)[: d.limit]
+        for r in ranked:
+            buyer = db.get(Buyer, r["id"])
+            drafts.append({**_buyer_draft(deal, buyer, ctx), "match_score": r["match_score"]})
+        return {"audience": "buyer", "deal": deal.address, "count": len(drafts), "drafts": drafts}
+
+    # seller queue
+    if d.lead_ids:
+        leads = [db.get(Lead, lid) for lid in d.lead_ids]
+        leads = [l for l in leads if l]
+    else:
+        stmt = select(Lead)
+        if d.status_filter:
+            stmt = stmt.where(Lead.status == d.status_filter)
+        leads = db.execute(stmt).scalars().all()
+    leads = leads[: d.limit]
+    for lead in leads:
+        drafts.append(_seller_draft(lead, d.step, ctx, d.use_ai))
+    with_email = sum(1 for x in drafts if not x["missing_email"])
+    return {
+        "audience": "seller", "step": d.step, "count": len(drafts),
+        "with_email": with_email, "missing_email": len(drafts) - with_email,
+        "drafts": drafts,
+    }
+
+
+@app.post("/api/outreach/mark-sent")
+def outreach_mark_sent(d: MarkSentInput, db: Session = Depends(get_db)):
+    """Record that you sent a message (from your own mail app) and advance the follow-up clock."""
+    log = OutreachLog(
+        lead_id=d.lead_id, buyer_id=d.buyer_id, channel=d.channel, direction="outbound",
+        provider="manual", template=d.template, recipient=d.recipient,
+        subject=d.subject, body=d.body, status="sent",
+    )
+    db.add(log)
+
+    lead = db.get(Lead, d.lead_id) if d.lead_id else None
+    if lead:
+        lead.contact_count = (lead.contact_count or 0) + 1
+        lead.last_contacted_at = _now()
+        days = d.schedule_followup_days if d.schedule_followup_days is not None else default_followup_days(lead.contact_count)
+        lead.next_follow_up_date = _now() + timedelta(days=days)
+        if lead.status == "New":
+            lead.status = "Contacted"
+    if d.buyer_id:
+        buyer = db.get(Buyer, d.buyer_id)
+        if buyer:
+            buyer.last_deal_sent_at = _now()
+    db.commit()
+    return {"logged": log.to_dict(), "lead": lead.to_dict() if lead else None}
+
+
+@app.get("/api/outreach/logs")
+def outreach_logs(lead_id: str = "", db: Session = Depends(get_db)):
+    stmt = select(OutreachLog).order_by(OutreachLog.created_at.desc())
+    if lead_id:
+        stmt = stmt.where(OutreachLog.lead_id == lead_id)
+    rows = db.execute(stmt.limit(200)).scalars().all()
+    return {"count": len(rows), "logs": [r.to_dict() for r in rows]}
 
 
 # ── ATTOM / NETWORK DEBUG ENDPOINTS ──────────────────────────────────────── #

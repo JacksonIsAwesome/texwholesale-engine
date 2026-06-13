@@ -181,6 +181,7 @@ function setText(id, v) { const el = document.getElementById(id); if (el) el.tex
 let LEADS_CACHE = [];
 let BUYERS_CACHE = [];
 let EDIT_BUYER_ID = null;
+let OUTREACH_DRAFTS = [];
 async function pageLeads() {
   const filter = document.getElementById("status-filter");
   if (filter) filter.addEventListener("change", () => renderLeads(filter.value));
@@ -745,6 +746,174 @@ async function genBlast() {
 }
 
 /* =====================================================================
+   PAGE: outreach (drafting + mailto, never sends)
+   ===================================================================== */
+function ouCtx() {
+  return {
+    investor_name: document.getElementById("ou-name")?.value.trim() || "",
+    phone: document.getElementById("ou-phone")?.value.trim() || "",
+    email: document.getElementById("ou-email")?.value.trim() || "",
+  };
+}
+
+async function pageOutreach() {
+  // populate sequence steps
+  try {
+    const seq = await API.get("/api/outreach/sequence");
+    const sel = document.getElementById("ou-step");
+    sel.innerHTML = seq.steps.map((s) => `<option value="${s.step}">${esc(s.label)}</option>`).join("");
+  } catch (e) { toast("Couldn't load sequence", e.message, "err"); }
+  // populate deals dropdown
+  try {
+    const data = await API.get("/api/leads");
+    document.getElementById("ou-deal").innerHTML = `<option value="">Select a deal…</option>` +
+      data.leads.map((l) => `<option value="${l.id}">${esc(l.address)} — ${esc(l.city)}</option>`).join("");
+  } catch (e) {}
+}
+
+function renderDrafts(data) {
+  const host = document.getElementById("ou-list");
+  setText("ou-list-title", data.audience === "buyer" ? "Buyer send list" : "Seller send list");
+  const meta = data.audience === "buyer"
+    ? `${data.count} buyers`
+    : `${data.count} leads · ${data.with_email} emailable · ${data.missing_email} no email`;
+  setText("ou-list-meta", meta);
+  if (!data.drafts.length) { host.innerHTML = `<div class="empty">No recipients.</div>`; return; }
+  host.innerHTML = data.drafts.map((d, i) => {
+    const sendBtn = d.mailto
+      ? `<a class="btn primary sm" href="${d.mailto}" onclick="markSent(${i})">Open email ↗</a>`
+      : `<span class="src-pill">no email — copy below</span>`;
+    return `<div class="card" style="padding:14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+        <div><strong>${esc(d.recipient_name) || "(no name)"}</strong>
+          ${d.match_score ? `<span class="score ${scoreClass(d.match_score)}" style="padding:0 6px">${d.match_score}</span>` : ""}
+          <span style="color:var(--text-faint);font-size:12px"> ${esc(d.recipient_email || d.recipient_phone || "")}</span></div>
+        <div class="btn-row" style="gap:6px">${sendBtn}
+          <button class="btn ghost sm" onclick="copyDraft(${i})">Copy</button></div>
+      </div>
+      <div style="font-size:12.5px;color:var(--text-muted);margin-top:6px"><strong>Subj:</strong> ${esc(d.subject)}</div>
+      <pre class="codebox" id="draft-${i}" style="margin-top:8px;max-height:160px">${esc(d.body)}</pre>
+    </div>`;
+  }).join("");
+  OUTREACH_DRAFTS = data.drafts;
+}
+
+async function buildSellerQueue() {
+  const ctx = ouCtx();
+  if (!ctx.investor_name) return toast("Add your name", "Fill in your signature first", "warn");
+  try {
+    const data = await API.post("/api/outreach/queue", {
+      audience: "seller", step: document.getElementById("ou-step").value,
+      status_filter: document.getElementById("ou-status").value, ...ctx, limit: 100,
+    });
+    renderDrafts(data);
+    toast("Send list ready", `${data.with_email} have email`, "ok");
+  } catch (e) { toast("Couldn't build list", e.message, "err"); }
+}
+
+async function buildBuyerQueue() {
+  const ctx = ouCtx();
+  const deal = document.getElementById("ou-deal").value;
+  if (!deal) return toast("Pick a deal", "", "warn");
+  try {
+    const data = await API.post("/api/outreach/queue", { audience: "buyer", deal_lead_id: deal, ...ctx, limit: 25 });
+    renderDrafts(data);
+    toast("Buyer list ready", `${data.count} matched`, "ok");
+  } catch (e) { toast("Couldn't build list", e.message, "err"); }
+}
+
+function copyDraft(i) {
+  const d = OUTREACH_DRAFTS[i];
+  navigator.clipboard.writeText(`Subject: ${d.subject}\n\n${d.body}`).then(() => toast("Copied", "", "ok"));
+}
+
+async function markSent(i) {
+  const d = OUTREACH_DRAFTS[i];
+  try {
+    await API.post("/api/outreach/mark-sent", {
+      lead_id: d.audience === "seller" ? d.lead_id : "",
+      buyer_id: d.audience === "buyer" ? d.buyer_id : "",
+      channel: "email", template: d.step || "", recipient: d.recipient_email,
+      subject: d.subject, body: d.body,
+    });
+    toast("Logged as sent", "Follow-up scheduled", "ok");
+  } catch (e) { /* opening mail shouldn't block on logging */ }
+}
+
+/* =====================================================================
+   PAGE: contracts
+   ===================================================================== */
+async function pageContracts() {
+  try {
+    const data = await API.get("/api/leads");
+    document.getElementById("ct-lead").innerHTML = `<option value="">Select a lead…</option>` +
+      data.leads.map((l) => `<option value="${l.id}">${esc(l.address)} — ${esc(l.city)}</option>`).join("");
+  } catch (e) {}
+  await renderContracts();
+}
+
+function ctPayload() {
+  const num = (id) => parseFloat(document.getElementById(id).value) || 0;
+  const str = (id) => document.getElementById(id).value.trim();
+  return {
+    lead_id: str("ct-lead"), contract_type: str("ct-type"),
+    buyer_name: str("ct-buyer"), buyer_entity: str("ct-entity"),
+    purchase_price: num("ct-price"), assignment_fee: num("ct-fee"),
+    monthly_rent: num("ct-rent"), option_fee: num("ct-optfee"),
+    existing_loan_balance: num("ct-loan"), monthly_piti: num("ct-piti"),
+  };
+}
+
+async function genContract() {
+  try {
+    const r = await API.post("/api/generate/contract", ctPayload());
+    document.getElementById("ct-out").textContent = r.contract;
+    toast("Contract ready", r.contract_type + " (review with an attorney)", "warn");
+  } catch (e) { toast("Generation failed", e.message, "err"); }
+}
+
+async function saveContractDraft() {
+  const p = ctPayload();
+  const body = document.getElementById("ct-out").textContent;
+  try {
+    const r = await API.post("/api/contracts/send-for-signature", {
+      lead_id: p.lead_id, contract_type: p.contract_type || "assignment",
+      counterparty: p.buyer_name, body: body && body.indexOf("appear here") === -1 ? body : "",
+    });
+    toast(r.status === "draft" ? "Saved as draft" : "Sent for signature", r.status, "ok");
+    renderContracts();
+  } catch (e) { toast("Couldn't save", e.message, "err"); }
+}
+
+async function renderContracts() {
+  const body = document.getElementById("ct-body");
+  if (body) body.innerHTML = skeletonRows(4, 5);
+  try {
+    const data = await API.get("/api/contracts");
+    if (!data.contracts.length) { body.innerHTML = `<tr><td colspan="5"><div class="empty">No saved contracts yet.</div></td></tr>`; return; }
+    body.innerHTML = data.contracts.map((c) => `
+      <tr>
+        <td><span class="src-pill">${esc(c.contract_type)}</span></td>
+        <td>${esc(c.counterparty) || "—"}</td>
+        <td>${esc(c.status)}</td>
+        <td>${(c.created_at || "").slice(0, 10)}</td>
+        <td><div class="btn-row" style="gap:4px">
+          <button class="btn ghost sm" onclick="setContractStatus('${c.id}','signed')">Signed</button>
+          <button class="btn ghost sm" onclick="setContractStatus('${c.id}','void')">Void</button>
+        </div></td>
+      </tr>`).join("");
+  } catch (e) { toast("Couldn't load contracts", e.message, "err"); }
+}
+
+async function setContractStatus(id, status) {
+  try {
+    await API.put(`/api/contracts/${id}/status`, { status });
+    toast("Updated", "→ " + status, "ok");
+    renderContracts();
+  } catch (e) { toast("Couldn't update", e.message, "err"); }
+}
+
+/* =====================================================================
    PAGE: boot
    ===================================================================== */
 document.addEventListener("DOMContentLoaded", () => {
@@ -752,7 +921,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const routes = {
     home: pageHome, leads: pageLeads, buyers: pageBuyers, pipeline: pagePipeline,
     calculator: pageCalculator, templates: () => {}, import: pageImport, settings: pageSettings,
-    followups: pageFollowups, deals: pageDeals,
+    followups: pageFollowups, deals: pageDeals, outreach: pageOutreach, contracts: pageContracts,
   };
   const fn = routes[document.body.dataset.page];
   if (fn) fn();

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contracts · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="contracts">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="followups" href="/dashboard/followups.html">Follow-ups</a><a data-page="outreach" href="/dashboard/outreach.html">Outreach</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="deals" href="/dashboard/deals.html">Deals</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="contracts" href="/dashboard/contracts.html">Contracts</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head">
+  <div class="eyebrow">Closing</div>
+  <h1>Contracts</h1>
+  <p>Generate the right contract type, save it, and track signing. Drafts are starting points — have a Texas attorney review before use.</p>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Generate</h3>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Deal (lead)</span><select id="ct-lead"><option value="">Select a lead…</option></select></label>
+      <label class="field"><span class="lbl">Type</span>
+        <select id="ct-type">
+          <option value="">Auto-select</option>
+          <option value="assignment">Assignment</option>
+          <option value="double_close">Double close</option>
+          <option value="lease_option">Lease option</option>
+          <option value="subject_to">Subject-to</option>
+        </select></label>
+      <label class="field"><span class="lbl">Buyer / assignee</span><input id="ct-buyer"></label>
+      <label class="field"><span class="lbl">Buyer entity</span><input id="ct-entity"></label>
+      <label class="field"><span class="lbl">Purchase price</span><input id="ct-price" type="number"></label>
+      <label class="field"><span class="lbl">Assignment fee</span><input id="ct-fee" type="number" value="10000"></label>
+      <label class="field"><span class="lbl">Monthly rent (LO)</span><input id="ct-rent" type="number"></label>
+      <label class="field"><span class="lbl">Option fee (LO)</span><input id="ct-optfee" type="number"></label>
+      <label class="field"><span class="lbl">Loan balance (sub-to)</span><input id="ct-loan" type="number"></label>
+      <label class="field"><span class="lbl">Monthly PITI (sub-to)</span><input id="ct-piti" type="number"></label>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="genContract()">Generate</button>
+      <button class="btn ghost sm" onclick="copyOut('ct-out')">Copy</button>
+      <button class="btn amber" onclick="saveContractDraft()">Save / send for signature</button>
+    </div>
+    <pre class="codebox" id="ct-out" style="margin-top:14px">Your contract will appear here.</pre>
+  </div>
+  <div class="card">
+    <h3>Saved contracts</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Type</th><th>Counterparty</th><th>Status</th><th>Created</th><th></th></tr></thead>
+        <tbody id="ct-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="note">No e-signature key (HelloSign/DocuSign) means contracts save as drafts to sign manually. Add a key later to send digitally.</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>

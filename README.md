@@ -160,6 +160,36 @@ The comps tool gives you a fast, auditable ballpark — median $/sqft is transpa
 fudge — but it is not a substitute for a full walkthrough and a local agent's BPO. Treat it as a
 screening number, not gospel, especially in mixed neighborhoods where $/sqft varies a lot.
 
+## Contracts, outreach & AI (v1.2–v1.3)
+
+**Contracts & closing**
+- `POST /api/generate/contract` — assignment, double close, lease-option, or subject-to, each
+  with the Texas §1101.0045 disclosure (subject-to adds a due-on-sale acknowledgment;
+  lease-option flags the Property Code Ch. 5 executory-contract rules). Auto-selects a type if
+  you don't specify. **Contracts** page.
+- `POST /api/contracts/send-for-signature` — saves the contract; with a HelloSign/DocuSign key
+  it marks it sent, otherwise returns sign-manually instructions. `GET /api/contracts` and
+  `PUT /api/contracts/{id}/status` track signing.
+
+**AI intelligence**
+- `POST /api/ai/offer-recommendation` — MAO (70% rule), suggested assignment fee, the offer
+  ceiling that still leaves your buyer a target margin, and competing-offer scenarios.
+- `POST /api/ai/parse-reply` — classifies a seller reply (interested / not interested / callback
+  / price objection / wrong number), logs it, updates status, flags suppression. Claude when a
+  key is set, keyword matching otherwise.
+- `POST /api/ai/personalize-template` — copy whose tone adapts to the lead's distress signal.
+
+**Outreach drafting (you send, the app never does)**
+- `POST /api/outreach/queue` — builds a send list: for each seller (or matched buyer) it drafts
+  the message and a pre-filled `mailto:` link. You click, your mail app opens, you send.
+- `GET /api/outreach/sequence` — seller sequence (intro → follow-ups 1–5 → still-interested →
+  breakup). `POST /api/outreach/mark-sent` logs the touch and schedules the next follow-up;
+  `GET /api/outreach/logs` is the history. **Outreach** page ties it together.
+
+> Why drafting instead of auto-send: automated calls/texts/voicemails to homeowners are covered
+> by the TCPA, with penalties of $500–$1,500 *per message*. Drafting while you send from your own
+> inbox keeps you out of that entirely.
+
 ### Database migrations
 
 New columns are added automatically on boot by `ensure_schema()` (it only ever *adds* missing

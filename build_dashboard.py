@@ -15,11 +15,13 @@ NAVLINKS = [
     ("home", "Overview", "/dashboard/index.html"),
     ("leads", "Leads", "/dashboard/leads.html"),
     ("followups", "Follow-ups", "/dashboard/followups.html"),
+    ("outreach", "Outreach", "/dashboard/outreach.html"),
     ("pipeline", "Pipeline", "/dashboard/pipeline.html"),
     ("deals", "Deals", "/dashboard/deals.html"),
     ("buyers", "Buyers", "/dashboard/buyers.html"),
     ("calculator", "Calculator", "/dashboard/calculator.html"),
     ("templates", "Templates", "/dashboard/templates.html"),
+    ("contracts", "Contracts", "/dashboard/contracts.html"),
     ("import", "Import", "/dashboard/import.html"),
     ("settings", "Settings", "/dashboard/settings.html"),
 ]
@@ -468,5 +470,103 @@ deals_body = """
 </div>
 """
 write("deals.html", page("deals", "Deals", deals_body))
+
+# ---------------- outreach ----------------
+outreach_body = """
+<div class="page-head">
+  <div class="eyebrow">Outreach</div>
+  <h1>Outreach drafts</h1>
+  <p>The app writes the message and gives you a pre-filled email link — you send it from your own mail app. Nothing is sent automatically.</p>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h3>Your signature</h3>
+  <div class="grid cols-3">
+    <label class="field"><span class="lbl">Your name</span><input id="ou-name" placeholder="Jackson"></label>
+    <label class="field"><span class="lbl">Your phone</span><input id="ou-phone" placeholder="612-555-0100"></label>
+    <label class="field"><span class="lbl">Your email</span><input id="ou-email" type="email"></label>
+  </div>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Seller sequence</h3>
+    <p style="color:var(--text-muted);font-size:13px;margin-top:0">Pick a step and draft for every lead (or filter by status). The fortune is in the follow-up.</p>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Step</span><select id="ou-step"></select></label>
+      <label class="field"><span class="lbl">Only status</span>
+        <select id="ou-status"><option value="">All leads</option>
+          <option>New</option><option>Contacted</option><option>Offer Sent</option></select></label>
+    </div>
+    <div class="btn-row"><button class="btn primary" onclick="buildSellerQueue()">Build send list</button></div>
+  </div>
+  <div class="card">
+    <h3>Buyer blast</h3>
+    <p style="color:var(--text-muted);font-size:13px;margin-top:0">Pitch one of your deals to its best-matched buyers.</p>
+    <label class="field"><span class="lbl">Deal</span><select id="ou-deal"><option value="">Select a deal…</option></select></label>
+    <div class="btn-row"><button class="btn primary" onclick="buildBuyerQueue()">Build buyer list</button></div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <h3 style="margin:0" id="ou-list-title">Send list</h3>
+    <span class="src-pill" id="ou-list-meta"></span>
+  </div>
+  <div id="ou-list"></div>
+</div>
+"""
+write("outreach.html", page("outreach", "Outreach", outreach_body))
+
+# ---------------- contracts ----------------
+contracts_body = """
+<div class="page-head">
+  <div class="eyebrow">Closing</div>
+  <h1>Contracts</h1>
+  <p>Generate the right contract type, save it, and track signing. Drafts are starting points — have a Texas attorney review before use.</p>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Generate</h3>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Deal (lead)</span><select id="ct-lead"><option value="">Select a lead…</option></select></label>
+      <label class="field"><span class="lbl">Type</span>
+        <select id="ct-type">
+          <option value="">Auto-select</option>
+          <option value="assignment">Assignment</option>
+          <option value="double_close">Double close</option>
+          <option value="lease_option">Lease option</option>
+          <option value="subject_to">Subject-to</option>
+        </select></label>
+      <label class="field"><span class="lbl">Buyer / assignee</span><input id="ct-buyer"></label>
+      <label class="field"><span class="lbl">Buyer entity</span><input id="ct-entity"></label>
+      <label class="field"><span class="lbl">Purchase price</span><input id="ct-price" type="number"></label>
+      <label class="field"><span class="lbl">Assignment fee</span><input id="ct-fee" type="number" value="10000"></label>
+      <label class="field"><span class="lbl">Monthly rent (LO)</span><input id="ct-rent" type="number"></label>
+      <label class="field"><span class="lbl">Option fee (LO)</span><input id="ct-optfee" type="number"></label>
+      <label class="field"><span class="lbl">Loan balance (sub-to)</span><input id="ct-loan" type="number"></label>
+      <label class="field"><span class="lbl">Monthly PITI (sub-to)</span><input id="ct-piti" type="number"></label>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="genContract()">Generate</button>
+      <button class="btn ghost sm" onclick="copyOut('ct-out')">Copy</button>
+      <button class="btn amber" onclick="saveContractDraft()">Save / send for signature</button>
+    </div>
+    <pre class="codebox" id="ct-out" style="margin-top:14px">Your contract will appear here.</pre>
+  </div>
+  <div class="card">
+    <h3>Saved contracts</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Type</th><th>Counterparty</th><th>Status</th><th>Created</th><th></th></tr></thead>
+        <tbody id="ct-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="note">No e-signature key (HelloSign/DocuSign) means contracts save as drafts to sign manually. Add a key later to send digitally.</div>
+"""
+write("contracts.html", page("contracts", "Contracts", contracts_body))
 
 print("done")

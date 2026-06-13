@@ -569,6 +569,13 @@ def _demo_leads(counties: Iterable[str]) -> list[tuple[dict, str]]:
             baths = 1.5 + (lead_num % 3) * 0.5         # 1.5-2.5
             sqft = 1100 + (lead_num * 137) % 2200      # ~1100-3300
             occ = ["owner", "vacant", "tenant"][lead_num % 3]
+            ac = _DEMO_AREA_CODES[lead_num % len(_DEMO_AREA_CODES)]
+            phone = f"{ac}-{200 + lead_num % 700:03d}-{1000 + (lead_num * 37) % 8999:04d}"
+            # ~60% of skip-traced leads have an email on file; the rest are phone/mail only.
+            email = ""
+            if lead_num % 5 < 3:
+                dom = _DEMO_EMAIL_DOMAINS[lead_num % len(_DEMO_EMAIL_DOMAINS)]
+                email = f"{fn.lower()}.{ln.lower()}{lead_num}@{dom}"
             rows.append(({
                 "address": address,
                 "city": city,
@@ -576,6 +583,8 @@ def _demo_leads(counties: Iterable[str]) -> list[tuple[dict, str]]:
                 "zip_code": f"75{zip_seed:03d}",
                 "county": county,
                 "owner_name": owner_name,
+                "owner_phone": phone,
+                "owner_email": email,
                 "est_value": 180000 + (lead_num * 12700) % 320000,
                 "est_equity_pct": 20 + (lead_num * 9) % 65,
                 "tax_delinquent": "tax-delinquent" in sigs,
