@@ -1262,6 +1262,87 @@ def config_js():
     )
 
 
+# ── ATTOM / NETWORK DEBUG ENDPOINTS ──────────────────────────────────────── #
+import logging
+logging.basicConfig(level=logging.DEBUG)
+_log = logging.getLogger("attom_debug")
+
+
+@app.get("/api/debug/httpbin")
+def debug_httpbin():
+    """Check whether httpx can reach the open internet at all."""
+    try:
+        with httpx.Client(timeout=10) as c:
+            r = c.get("https://httpbin.org/get")
+            return {"ok": True, "status": r.status_code, "body": r.text[:500]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+class AttomTestRequest(BaseModel):
+    path: str = "/property/basicprofile"
+    params: dict = {}
+
+
+@app.post("/api/debug/attom-test")
+def debug_attom_test(req: AttomTestRequest):
+    """
+    Make a real ATTOM request and return full diagnostics.
+    Example body: {"path": "/property/basicprofile", "params": {"address1": "1 Main St", "address2": "Dallas, TX 75201"}}
+    """
+    base = os.getenv("ATTOM_BASE", "https://api.developer.attomdata.com").rstrip("/")
+    key  = os.getenv("ATTOM_API_KEY", "").strip()
+    url  = f"{base}{req.path}"
+    masked_key = f"{'*' * 8}{key[-4:]}" if len(key) > 4 else ("NOT SET" if not key else "TOO SHORT")
+
+    _log.debug("ATTOM DEBUG REQUEST → %s  params=%s  key=%s", url, req.params, masked_key)
+
+    result: dict = {
+        "url": url,
+        "masked_key": masked_key,
+        "params": req.params,
+        "attom_key_set": bool(key),
+        "attom_base_env": os.getenv("ATTOM_BASE", "(using default)"),
+    }
+
+    # Step 1 — raw connectivity to ATTOM root
+    try:
+        with httpx.Client(timeout=10) as c:
+            ping = c.get("https://api.developer.attomdata.com")
+            result["connectivity"] = {"status": ping.status_code, "ok": True}
+    except Exception as e:
+        result["connectivity"] = {"ok": False, "error": str(e)}
+
+    # Step 2 — actual API call
+    if not key:
+        result["attom_call"] = {"skipped": "ATTOM_API_KEY not set"}
+        return result
+
+    headers = {
+        "apikey": key,
+        "Accept": "application/json",
+    }
+    _log.debug("ATTOM headers (masked): apikey=%s Accept=application/json", masked_key)
+
+    try:
+        with httpx.Client(timeout=15) as c:
+            r = c.get(url, headers=headers, params=req.params)
+            _log.debug("ATTOM response: %s", r.status_code)
+            result["attom_call"] = {
+                "status_code": r.status_code,
+                "response_headers": dict(r.headers),
+                "body_preview": r.text[:500],
+            }
+    except httpx.TimeoutException as e:
+        result["attom_call"] = {"error": "TIMEOUT", "detail": str(e)}
+    except httpx.ConnectError as e:
+        result["attom_call"] = {"error": "CONNECTION_FAILED", "detail": str(e)}
+    except Exception as e:
+        result["attom_call"] = {"error": type(e).__name__, "detail": str(e)}
+
+    return result
+
+
 # Serve the dashboard assets/pages last so /api routes win.
 app.mount("/dashboard", StaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard")
 
