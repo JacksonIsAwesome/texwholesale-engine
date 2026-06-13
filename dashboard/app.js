@@ -179,6 +179,8 @@ function setText(id, v) { const el = document.getElementById(id); if (el) el.tex
    PAGE: leads
    ===================================================================== */
 let LEADS_CACHE = [];
+let BUYERS_CACHE = [];
+let EDIT_BUYER_ID = null;
 async function pageLeads() {
   const filter = document.getElementById("status-filter");
   if (filter) filter.addEventListener("change", () => renderLeads(filter.value));
@@ -238,23 +240,71 @@ async function renderBuyers() {
   if (body) body.innerHTML = skeletonRows(6, 6);
   try {
     const data = await API.get("/api/buyers");
+    BUYERS_CACHE = data.buyers;
     setText("buyers-count", data.count + " buyers");
     if (!data.buyers.length) {
       body.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="big">No buyers yet</div>Add one manually or import your buyer list.</div></td></tr>`;
       return;
     }
-    body.innerHTML = data.buyers.map((b) => `
-      <tr>
+    body.innerHTML = data.buyers.map((b) => {
+      const area = (b.target_zips || []).concat(b.target_cities || []).slice(0, 3).join(", ") || (b.city || "—");
+      const pof = b.pof_received ? `<span style="color:var(--green,#34d399)">✓ ${fmtMoney(b.pof_amount)}</span>` : "—";
+      return `<tr style="cursor:pointer" onclick="openBuyerEdit('${b.id}')">
         <td><span class="score ${scoreClass(b.cash_buyer_score)}">${b.cash_buyer_score}</span></td>
-        <td><strong>${esc(b.name)}</strong> ${b.entity_type ? `<span class="src-pill">${esc(b.entity_type)}</span>` : ""}</td>
+        <td><strong>${esc(b.name)}</strong> ${b.entity_type ? `<span class="src-pill">${esc(b.entity_type)}</span>` : ""}${b.active ? "" : ` <span class="src-pill">inactive</span>`}</td>
         <td>${esc(b.email) || "—"}<br><span style="color:var(--text-faint);font-size:12px">${esc(b.phone) || ""}</span></td>
         <td>${b.budget_max ? fmtMoney(b.budget_min) + "–" + fmtMoney(b.budget_max) : "—"}</td>
-        <td>${esc(b.city) || "—"}</td>
-        <td><span class="src-pill">${esc(b.source)}</span></td>
-      </tr>`).join("");
+        <td>${esc(area)}</td>
+        <td>${pof}</td>
+      </tr>`;
+    }).join("");
   } catch (e) {
     toast("Couldn't load buyers", e.message, "err");
   }
+}
+
+function openBuyerEdit(id) {
+  const b = (BUYERS_CACHE || []).find((x) => x.id === id);
+  if (!b) return;
+  EDIT_BUYER_ID = id;
+  const set = (k, v) => { const el = document.getElementById(k); if (el) el.value = v ?? ""; };
+  setText("be-title", "Edit — " + b.name);
+  set("be-bmin", b.budget_min || ""); set("be-bmax", b.budget_max || "");
+  set("be-zips", (b.target_zips || []).join(", "));
+  set("be-cities", (b.target_cities || []).join(", "));
+  set("be-counties", (b.target_counties || []).join(", "));
+  set("be-assets", (b.asset_types || []).join(", "));
+  set("be-minbeds", b.min_beds || ""); set("be-maxrehab", b.max_rehab || "");
+  set("be-deals", b.recent_cash_deals || "");
+  set("be-active", b.active ? "true" : "false");
+  set("be-pof", b.pof_received ? "true" : "false");
+  set("be-pofamt", b.pof_amount || "");
+  set("be-pofexp", (b.pof_expires || "").slice(0, 10));
+  openModal("buyer-edit-modal");
+}
+
+async function saveBuyerEdit() {
+  if (!EDIT_BUYER_ID) return;
+  const num = (id) => { const x = parseFloat(document.getElementById(id).value); return isNaN(x) ? null : x; };
+  const str = (id) => document.getElementById(id).value.trim();
+  const payload = {
+    budget_min: num("be-bmin"), budget_max: num("be-bmax"),
+    target_zips: str("be-zips"), target_cities: str("be-cities"), target_counties: str("be-counties"),
+    asset_types: str("be-assets"), min_beds: num("be-minbeds"), max_rehab: num("be-maxrehab"),
+    recent_cash_deals: num("be-deals"), active: document.getElementById("be-active").value === "true",
+  };
+  Object.keys(payload).forEach((k) => payload[k] === null && delete payload[k]);
+  try {
+    await API.put(`/api/buyers/${EDIT_BUYER_ID}`, payload);
+    await API.put(`/api/buyers/${EDIT_BUYER_ID}/pof`, {
+      pof_received: document.getElementById("be-pof").value === "true",
+      pof_amount: num("be-pofamt") || 0,
+      pof_expires: str("be-pofexp") || null,
+    });
+    toast("Buyer updated", "", "ok");
+    closeModal("buyer-edit-modal");
+    renderBuyers();
+  } catch (e) { toast("Couldn't save", e.message, "err"); }
 }
 
 async function saveBuyer() {
@@ -505,12 +555,204 @@ function skeletonRows(rows, cols) {
   ).join("");
 }
 
-/* ---------- boot ---------- */
+/* =====================================================================
+   PAGE: follow-ups
+   ===================================================================== */
+async function pageFollowups() {
+  const sel = document.getElementById("fu-window");
+  sel?.addEventListener("change", () => renderFollowups(sel.value));
+  await renderFollowups(sel ? sel.value : "today");
+}
+
+async function renderFollowups(window) {
+  const body = document.getElementById("fu-body");
+  if (body) body.innerHTML = skeletonRows(6, 6);
+  try {
+    const data = await API.get("/api/follow-ups/due?window=" + encodeURIComponent(window));
+    setText("fu-count", data.count + (data.count === 1 ? " lead" : " leads") + " to work");
+    if (!data.leads.length) {
+      body.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="big">Nothing due</div>You're all caught up for this window.</div></td></tr>`;
+      return;
+    }
+    body.innerHTML = data.leads.map((l) => {
+      const d = l.due_in_days;
+      const due = d < 0 ? `<span style="color:var(--red,#f87171)">${Math.abs(d)}d overdue</span>`
+        : d === 0 ? `<span style="color:var(--amber,#ffb020)">today</span>`
+        : `in ${d}d`;
+      return `<tr>
+        <td>${due}</td>
+        <td><strong>${esc(l.address)}</strong><br><span style="color:var(--text-faint);font-size:12px">${esc(l.city)}, ${esc(l.state)}</span></td>
+        <td>${esc(l.owner_name) || "—"}</td>
+        <td>${esc(l.owner_phone) || "—"}</td>
+        <td>${l.contact_count || 0}</td>
+        <td><div class="btn-row" style="gap:6px">
+          <button class="btn ghost sm" onclick="logTouch('${l.id}','call','spoke')">Called</button>
+          <button class="btn ghost sm" onclick="logTouch('${l.id}','text','no_answer')">Texted</button>
+          <button class="btn ghost sm" onclick="logTouch('${l.id}','call','no_answer')">No answer</button>
+        </div></td>
+      </tr>`;
+    }).join("");
+  } catch (e) {
+    toast("Couldn't load follow-ups", e.message, "err");
+  }
+}
+
+async function logTouch(leadId, channel, outcome) {
+  try {
+    const r = await API.post(`/api/leads/${leadId}/contact-log`, { channel, outcome });
+    const next = r.lead.days_until_follow_up;
+    toast("Touch logged", `Next follow-up in ${next}d`, "ok");
+    const sel = document.getElementById("fu-window");
+    renderFollowups(sel ? sel.value : "today");
+  } catch (e) {
+    toast("Couldn't log touch", e.message, "err");
+  }
+}
+
+/* =====================================================================
+   PAGE: deals (workspace + deadlines)
+   ===================================================================== */
+let CURRENT_DEAL = null;
+
+async function pageDeals() {
+  await renderDeadlines();
+  const sel = document.getElementById("deal-lead");
+  try {
+    const data = await API.get("/api/leads");
+    sel.innerHTML = `<option value="">Select a lead…</option>` +
+      data.leads.map((l) => `<option value="${l.id}">${esc(l.address)} — ${esc(l.city)}</option>`).join("");
+  } catch (e) { toast("Couldn't load leads", e.message, "err"); }
+  sel?.addEventListener("change", () => selectDeal(sel.value));
+}
+
+async function renderDeadlines() {
+  const host = document.getElementById("deadlines");
+  if (!host) return;
+  try {
+    const data = await API.get("/api/deals/deadlines");
+    if (!data.count) {
+      host.innerHTML = `<div style="color:var(--text-faint);font-size:13px">No deadlines set. Add inspection or close dates to a deal below.</div>`;
+      return;
+    }
+    host.innerHTML = `<div class="grid cols-3">` + data.deals.map((d) => {
+      const s = d.soonest_days;
+      const color = s < 0 ? "var(--red,#f87171)" : s <= 3 ? "var(--amber,#ffb020)" : "var(--green,#34d399)";
+      const events = d.deadlines.map((e) =>
+        `<div style="font-size:12.5px;color:var(--text-muted)">${e.label}: <b style="color:${color}">${e.days_remaining < 0 ? Math.abs(e.days_remaining) + "d ago" : e.days_remaining + "d"}</b> · ${e.date}</div>`).join("");
+      return `<div class="card" style="padding:14px">
+        <div style="font-weight:600">${esc(d.address)}</div>
+        <div style="color:var(--text-faint);font-size:12px;margin-bottom:6px">${esc(d.city)}, ${esc(d.state)} · ${esc(d.status)}</div>
+        ${events}</div>`;
+    }).join("") + `</div>`;
+  } catch (e) { toast("Couldn't load deadlines", e.message, "err"); }
+}
+
+async function selectDeal(id) {
+  const panel = document.getElementById("deal-panel");
+  if (!id) { panel.style.display = "none"; CURRENT_DEAL = null; return; }
+  try {
+    CURRENT_DEAL = await API.get(`/api/leads/${id}`);
+    panel.style.display = "block";
+    const v = (k, val) => { const el = document.getElementById(k); if (el) el.value = (val ?? "") === 0 ? "" : (val ?? ""); };
+    v("d-arv", CURRENT_DEAL.arv); v("d-repair", CURRENT_DEAL.repair_estimate);
+    v("d-ask", CURRENT_DEAL.asking_price); v("d-earnest", CURRENT_DEAL.earnest_money);
+    v("d-beds", CURRENT_DEAL.beds); v("d-baths", CURRENT_DEAL.baths);
+    v("d-sqft", CURRENT_DEAL.sqft); v("d-occ", CURRENT_DEAL.occupancy);
+    v("d-insp", (CURRENT_DEAL.inspection_end_date || "").slice(0, 10));
+    v("d-close", (CURRENT_DEAL.close_date || "").slice(0, 10));
+    document.getElementById("d-pisheet").href = `/api/leads/${id}/pi-sheet`;
+    document.getElementById("comps-out").innerHTML = "";
+    document.getElementById("blast-out").innerHTML = "";
+    await loadMatches();
+  } catch (e) { toast("Couldn't load deal", e.message, "err"); }
+}
+
+async function saveDealTerms() {
+  if (!CURRENT_DEAL) return;
+  const num = (id) => { const x = parseFloat(document.getElementById(id).value); return isNaN(x) ? null : x; };
+  const str = (id) => document.getElementById(id).value.trim() || null;
+  const payload = {
+    arv: num("d-arv"), repair_estimate: num("d-repair"), asking_price: num("d-ask"),
+    earnest_money: num("d-earnest"), beds: num("d-beds"), baths: num("d-baths"),
+    sqft: num("d-sqft"), occupancy: str("d-occ"),
+    inspection_end_date: str("d-insp"), close_date: str("d-close"),
+  };
+  Object.keys(payload).forEach((k) => payload[k] === null && delete payload[k]);
+  try {
+    CURRENT_DEAL = await API.put(`/api/leads/${CURRENT_DEAL.id}/deal-terms`, payload);
+    toast("Deal terms saved", "", "ok");
+    renderDeadlines();
+    loadMatches();
+  } catch (e) { toast("Couldn't save", e.message, "err"); }
+}
+
+async function runComps() {
+  if (!CURRENT_DEAL) return;
+  const lines = document.getElementById("d-comps").value.trim().split("\n").filter(Boolean);
+  const comps = lines.map((ln) => {
+    const [sqft, price] = ln.split(",").map((x) => parseFloat(x.trim()));
+    return { sqft: sqft || 0, sale_price: price || 0 };
+  }).filter((c) => c.sqft && c.sale_price);
+  if (!comps.length) return toast("No comps", "Enter lines like: 1800, 290000", "warn");
+  try {
+    const subjectSqft = parseFloat(document.getElementById("d-sqft").value) || CURRENT_DEAL.sqft || 0;
+    const r = await API.post("/api/comps", { lead_id: CURRENT_DEAL.id, subject_sqft: subjectSqft, comps });
+    if (!r.arv) { document.getElementById("comps-out").innerHTML = `<div class="note">${esc(r.note)}</div>`; return; }
+    document.getElementById("d-arv").value = r.arv;
+    const confColor = r.confidence === "high" ? "var(--green,#34d399)" : r.confidence === "medium" ? "var(--amber,#ffb020)" : "var(--red,#f87171)";
+    document.getElementById("comps-out").innerHTML =
+      `<div class="result-row"><span class="k">ARV (median $/sqft × ${subjectSqft})</span><span class="v">${fmtMoney(r.arv)}</span></div>
+       <div class="result-row"><span class="k">Range</span><span class="v">${fmtMoney(r.arv_low)} – ${fmtMoney(r.arv_high)}</span></div>
+       <div class="result-row"><span class="k">Comps used / confidence</span><span class="v">${r.qualified_count} · <span style="color:${confColor}">${r.confidence}</span></span></div>`;
+    toast("ARV computed", "Dropped into the ARV field", "ok");
+  } catch (e) { toast("Comps failed", e.message, "err"); }
+}
+
+async function loadMatches() {
+  if (!CURRENT_DEAL) return;
+  const body = document.getElementById("match-body");
+  if (body) body.innerHTML = skeletonRows(4, 6);
+  try {
+    const data = await API.get(`/api/leads/${CURRENT_DEAL.id}/matched-buyers`);
+    if (!data.buyers.length) { body.innerHTML = `<tr><td colspan="6"><div class="empty">No buyers yet.</div></td></tr>`; return; }
+    body.innerHTML = data.buyers.map((b) => `
+      <tr>
+        <td><span class="score ${scoreClass(b.match_score)}">${b.match_score}</span></td>
+        <td><strong>${esc(b.name)}</strong></td>
+        <td>${esc(b.email) || "—"}<br><span style="color:var(--text-faint);font-size:12px">${esc(b.phone) || ""}</span></td>
+        <td>${b.budget_max ? fmtMoney(b.budget_min) + "–" + fmtMoney(b.budget_max) : "—"}</td>
+        <td>${b.pof_received ? `<span style="color:var(--green,#34d399)">✓ ${fmtMoney(b.pof_amount)}</span>` : "—"}</td>
+        <td><span style="font-size:12px;color:var(--text-muted)">${(b.match_reasons || []).join(" · ") || "—"}</span></td>
+      </tr>`).join("");
+  } catch (e) { toast("Couldn't match buyers", e.message, "err"); }
+}
+
+async function genBlast() {
+  if (!CURRENT_DEAL) return;
+  try {
+    const r = await API.post(`/api/leads/${CURRENT_DEAL.id}/blast`, {});
+    document.getElementById("blast-out").innerHTML = `
+      <div class="card" style="margin-top:14px">
+        <h3>Email blast — ${r.matched_buyers.length} matched buyers</h3>
+        <div class="result-row"><span class="k">Subject</span><span class="v">${esc(r.email.subject)}</span></div>
+        <pre class="codebox" style="margin-top:10px">${esc(r.email.body)}</pre>
+        <h3 style="margin-top:14px">SMS</h3>
+        <pre class="codebox">${esc(r.sms.body)}</pre>
+        <div class="note">${esc(r.note)}</div>
+      </div>`;
+    toast("Blast ready", "Review before sending", "ok");
+  } catch (e) { toast("Couldn't generate blast", e.message, "err"); }
+}
+
+/* =====================================================================
+   PAGE: boot
+   ===================================================================== */
 document.addEventListener("DOMContentLoaded", () => {
   initChrome();
   const routes = {
     home: pageHome, leads: pageLeads, buyers: pageBuyers, pipeline: pagePipeline,
     calculator: pageCalculator, templates: () => {}, import: pageImport, settings: pageSettings,
+    followups: pageFollowups, deals: pageDeals,
   };
   const fn = routes[document.body.dataset.page];
   if (fn) fn();

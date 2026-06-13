@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/dashboard/styles.css">
 </head>
 <body data-page="buyers">
-<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="followups" href="/dashboard/followups.html">Follow-ups</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="deals" href="/dashboard/deals.html">Deals</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
 <main class="wrap">
 
 <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px">
@@ -21,10 +21,11 @@
 </div>
 <div class="tbl-wrap">
   <table>
-    <thead><tr><th>Score</th><th>Buyer</th><th>Contact</th><th>Budget</th><th>City</th><th>Source</th></tr></thead>
+    <thead><tr><th>Score</th><th>Buyer</th><th>Contact</th><th>Budget</th><th>Target area</th><th>POF</th></tr></thead>
     <tbody id="buyers-body"></tbody>
   </table>
 </div>
+<div class="note">Click a buyer to edit their buy box (target ZIPs/cities, max rehab, asset types) and proof-of-funds — these drive deal matching.</div>
 
 <div class="modal-backdrop" id="buyer-modal">
   <div class="modal">
@@ -46,6 +47,33 @@
     <div class="btn-row"><button class="btn primary" id="save-buyer">Save buyer</button>
       <button class="btn ghost" onclick="closeModal('buyer-modal')">Cancel</button></div>
     <div class="note">Name plus at least one of email or phone is required.</div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="buyer-edit-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('buyer-edit-modal')">&times;</button>
+    <h2 id="be-title">Edit buyer</h2>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Budget min</span><input id="be-bmin" type="number"></label>
+      <label class="field"><span class="lbl">Budget max</span><input id="be-bmax" type="number"></label>
+      <label class="field"><span class="lbl">Target ZIPs (comma-sep)</span><input id="be-zips" placeholder="75001, 75002"></label>
+      <label class="field"><span class="lbl">Target cities (comma-sep)</span><input id="be-cities"></label>
+      <label class="field"><span class="lbl">Target counties</span><input id="be-counties"></label>
+      <label class="field"><span class="lbl">Asset types</span><input id="be-assets" placeholder="Single Family, Duplex"></label>
+      <label class="field"><span class="lbl">Min beds</span><input id="be-minbeds" type="number" step="0.5"></label>
+      <label class="field"><span class="lbl">Max rehab budget</span><input id="be-maxrehab" type="number"></label>
+      <label class="field"><span class="lbl">Recent cash deals</span><input id="be-deals" type="number"></label>
+      <label class="field"><span class="lbl">Active</span><select id="be-active"><option value="true">Yes</option><option value="false">No</option></select></label>
+    </div>
+    <h3 style="margin-top:6px">Proof of funds</h3>
+    <div class="grid cols-3">
+      <label class="field"><span class="lbl">On file</span><select id="be-pof"><option value="false">No</option><option value="true">Yes</option></select></label>
+      <label class="field"><span class="lbl">Amount</span><input id="be-pofamt" type="number"></label>
+      <label class="field"><span class="lbl">Expires</span><input id="be-pofexp" placeholder="2026-12-31"></label>
+    </div>
+    <div class="btn-row"><button class="btn primary" onclick="saveBuyerEdit()">Save changes</button>
+      <button class="btn ghost" onclick="closeModal('buyer-edit-modal')">Cancel</button></div>
   </div>
 </div>
 

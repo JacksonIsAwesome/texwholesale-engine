@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deals · TexWholesale Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body data-page="deals">
+<nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="followups" href="/dashboard/followups.html">Follow-ups</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="deals" href="/dashboard/deals.html">Deals</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
+<main class="wrap">
+
+<div class="page-head">
+  <div class="eyebrow">Disposition & closing</div>
+  <h1>Deals</h1>
+  <p>Set deal terms, pull comps, match buyers, print a property info sheet, and track deadlines.</p>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h3>Closing deadlines</h3>
+  <div id="deadlines"></div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <h3 style="margin:0">Deal workspace</h3>
+    <select id="deal-lead" style="width:auto;min-width:280px"><option value="">Select a lead…</option></select>
+  </div>
+
+  <div id="deal-panel" style="display:none;margin-top:18px">
+    <div class="grid cols-2">
+      <div>
+        <h3>Deal terms</h3>
+        <div class="grid cols-2">
+          <label class="field"><span class="lbl">ARV</span><input id="d-arv" type="number"></label>
+          <label class="field"><span class="lbl">Repair estimate</span><input id="d-repair" type="number"></label>
+          <label class="field"><span class="lbl">Asking price (assignment incl.)</span><input id="d-ask" type="number"></label>
+          <label class="field"><span class="lbl">Earnest money</span><input id="d-earnest" type="number"></label>
+          <label class="field"><span class="lbl">Beds</span><input id="d-beds" type="number" step="0.5"></label>
+          <label class="field"><span class="lbl">Baths</span><input id="d-baths" type="number" step="0.5"></label>
+          <label class="field"><span class="lbl">Sq ft</span><input id="d-sqft" type="number"></label>
+          <label class="field"><span class="lbl">Occupancy</span><input id="d-occ" placeholder="vacant / owner / tenant"></label>
+          <label class="field"><span class="lbl">Inspection ends</span><input id="d-insp" placeholder="2026-06-20"></label>
+          <label class="field"><span class="lbl">Close date</span><input id="d-close" placeholder="2026-07-01"></label>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" onclick="saveDealTerms()">Save terms</button>
+          <a class="btn amber" id="d-pisheet" target="_blank" rel="noopener">Open PI sheet ↗</a>
+        </div>
+      </div>
+      <div>
+        <h3>Comps → ARV</h3>
+        <p style="color:var(--text-muted);font-size:13px;margin-top:0">Enter sold comps (one per line): <code>sqft, sale_price</code>. Computes ARV from the median $/sqft and drops in above.</p>
+        <textarea id="d-comps" style="min-height:120px;font-family:var(--mono,monospace)" placeholder="1750, 270000&#10;1900, 295000&#10;1700, 260000"></textarea>
+        <div class="btn-row"><button class="btn primary" onclick="runComps()">Compute ARV</button></div>
+        <div id="comps-out" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:8px">Matched buyers</h3>
+    <div class="btn-row" style="margin-bottom:8px">
+      <button class="btn ghost sm" onclick="loadMatches()">Refresh matches</button>
+      <button class="btn primary sm" onclick="genBlast()">Generate blast</button>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Match</th><th>Buyer</th><th>Contact</th><th>Budget</th><th>POF</th><th>Why</th></tr></thead>
+        <tbody id="match-body"></tbody>
+      </table>
+    </div>
+    <div id="blast-out"></div>
+  </div>
+</div>
+
+</main>
+<div id="toasts"></div>
+<script src="/dashboard/app.js"></script>
+
+</body>
+</html>

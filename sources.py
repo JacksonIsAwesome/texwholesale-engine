@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 import httpx
@@ -411,6 +412,91 @@ def fetch_market_stats(attom_key: str, markets: list[str]) -> dict | None:
     return None
 
 
+def fetch_sales_comps(
+    *,
+    postal_code: str = "",
+    city: str = "",
+    state: str = "TX",
+    latitude: float = 0.0,
+    longitude: float = 0.0,
+    radius_mi: float = 1.0,
+    months_back: int = 6,
+    property_type: str = "",
+    page_size: int = 25,
+) -> list[dict] | None:
+    """
+    Pull recent sold comparables from ATTOM. Returns a list of normalized comp
+    dicts, or None if ATTOM is unavailable/unreachable (caller then relies on
+    manually-entered comps). Each comp:
+        {address, city, state, zip_code, sale_price, sale_date, sqft,
+         beds, baths, year_built, latitude, longitude, distance_mi}
+    """
+    if not ATTOM_KEY:
+        return None
+
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=int(months_back * 30.4))
+    params: dict = {
+        "pagesize": str(page_size),
+        "startsalesearchdate": start.isoformat(),
+        "endsalesearchdate": end.isoformat(),
+        "orderby": "salesearchdate desc",
+    }
+    # Prefer a geographic radius when we have coordinates; otherwise fall back
+    # to postal code / city scoping.
+    if latitude and longitude:
+        params["latitude"] = f"{latitude}"
+        params["longitude"] = f"{longitude}"
+        params["radius"] = f"{radius_mi}"
+    elif postal_code:
+        params["postalcode"] = postal_code
+    elif city:
+        params["address2"] = f"{city}, {state}"
+    else:
+        return None
+    if property_type:
+        params["propertytype"] = property_type
+
+    data = _attom_get("/propertyapi/v1.0.0/sale/snapshot", params)
+    if not data:
+        return None
+
+    rows = data.get("property", []) or []
+    comps: list[dict] = []
+    for p in rows:
+        addr = p.get("address") or {}
+        sale = p.get("sale") or {}
+        amt = (sale.get("amount") or {}).get("saleamt") or sale.get("saleamt") or 0
+        building = p.get("building") or {}
+        size = (building.get("size") or {})
+        rooms = (building.get("rooms") or {})
+        summary = (p.get("summary") or {})
+        loc = (p.get("location") or {})
+        try:
+            sale_price = float(amt or 0)
+        except (TypeError, ValueError):
+            sale_price = 0.0
+        if sale_price <= 0:
+            continue
+        comps.append({
+            "address": addr.get("line1", ""),
+            "city": addr.get("locality", city),
+            "state": addr.get("countrySubd", state),
+            "zip_code": addr.get("postal1", postal_code),
+            "sale_price": sale_price,
+            "sale_date": (sale.get("salesearchdate") or sale.get("saleTransDate") or ""),
+            "sqft": float(size.get("universalsize") or size.get("livingsize") or 0) or 0.0,
+            "beds": float(rooms.get("beds") or 0) or 0.0,
+            "baths": float(rooms.get("bathstotal") or rooms.get("bathsfull") or 0) or 0.0,
+            "year_built": int(summary.get("yearbuilt") or 0) or 0,
+            "latitude": float(loc.get("latitude") or 0) or 0.0,
+            "longitude": float(loc.get("longitude") or 0) or 0.0,
+            "distance_mi": float(loc.get("distance") or 0) or 0.0,
+        })
+    _log("attom", f"sale/snapshot returned {len(comps)} usable comps")
+    return comps
+
+
 # --------------------------------------------------------------------------- #
 # Demo data (DEMO_MODE=true) — lets the dashboard light up with no keys
 # --------------------------------------------------------------------------- #
@@ -479,6 +565,10 @@ def _demo_leads(counties: Iterable[str]) -> list[tuple[dict, str]]:
             ln = _DEMO_LAST_NAMES[(lead_num * 7) % len(_DEMO_LAST_NAMES)]
             owner_name = f"{fn} {ln}"
             zip_seed = (i * 7 + j * 13 + 100) % 900
+            beds = 3 + (lead_num % 3)                 # 3-5 beds
+            baths = 1.5 + (lead_num % 3) * 0.5         # 1.5-2.5
+            sqft = 1100 + (lead_num * 137) % 2200      # ~1100-3300
+            occ = ["owner", "vacant", "tenant"][lead_num % 3]
             rows.append(({
                 "address": address,
                 "city": city,
@@ -491,6 +581,13 @@ def _demo_leads(counties: Iterable[str]) -> list[tuple[dict, str]]:
                 "tax_delinquent": "tax-delinquent" in sigs,
                 "days_on_market": (lead_num * 17) % 180,
                 "distress_signals": sigs,
+                "beds": float(beds),
+                "baths": float(baths),
+                "sqft": float(sqft),
+                "year_built": 1955 + (lead_num * 3) % 65,
+                "lot_sqft": float(5000 + (lead_num * 311) % 6000),
+                "property_type": "Single Family",
+                "occupancy": occ,
             }, "demo"))
             lead_num += 1
     return rows
@@ -509,6 +606,7 @@ def _demo_buyers(counties: Iterable[str]) -> list[tuple[dict, str]]:
     ]
     rows = []
     counties = list(counties) or DEFAULT_COUNTIES
+    asset_pool = ["Single Family", "Single Family, Duplex", "Single Family", "Single Family, Multi-Family"]
     for i, (name, etype, email, phone) in enumerate(buyers):
         county = counties[i % len(counties)]
         city, state = COUNTY_SEAT.get(county, (county, "TX"))
@@ -521,6 +619,13 @@ def _demo_buyers(counties: Iterable[str]) -> list[tuple[dict, str]]:
             "state": state,
             "budget_min": 80000 + i * 10000,
             "budget_max": 280000 + i * 45000,
+            "target_cities": city,
+            "target_counties": county,
+            "min_beds": float(2 + (i % 3)),
+            "max_rehab": float(40000 + (i % 4) * 15000),
+            "asset_types": asset_pool[i % len(asset_pool)],
             "recent_cash_deals": (i % 5) + 1,
+            "pof_received": (i % 2 == 0),
+            "pof_amount": float(250000 + i * 50000) if (i % 2 == 0) else 0.0,
         }, "demo"))
     return rows

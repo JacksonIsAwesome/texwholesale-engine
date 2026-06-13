@@ -15,6 +15,7 @@ import csv
 import io
 import json
 import os
+import statistics
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -47,7 +48,7 @@ load_dotenv()
 # --------------------------------------------------------------------------- #
 
 APP_NAME = "TexWholesale Engine"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./texwholesale.db")
 # Railway/Heroku hand out postgres:// ; SQLAlchemy 2.x wants postgresql://
@@ -123,13 +124,54 @@ class Lead(Base):
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=_now)
 
+    # --- Property characteristics (used for comps / ARV / PI sheet) -------- #
+    beds = Column(Float, default=0.0)
+    baths = Column(Float, default=0.0)
+    sqft = Column(Float, default=0.0)
+    year_built = Column(Integer, default=0)
+    lot_sqft = Column(Float, default=0.0)
+    property_type = Column(String, default="Single Family")
+    occupancy = Column(String, default="")          # owner | tenant | vacant
+    latitude = Column(Float, default=0.0)
+    longitude = Column(Float, default=0.0)
+    photo_urls = Column(Text, default="[]")          # JSON list of image URLs
+
+    # --- Deal terms (set once you're working it) --------------------------- #
+    arv = Column(Float, default=0.0)
+    repair_estimate = Column(Float, default=0.0)
+    asking_price = Column(Float, default=0.0)         # what you'll list it to buyers for
+    assignment_fee_target = Column(Float, default=10000.0)
+    earnest_money = Column(Float, default=0.0)
+    contract_date = Column(DateTime, nullable=True)
+    inspection_end_date = Column(DateTime, nullable=True)
+    close_date = Column(DateTime, nullable=True)
+
+    # --- Follow-up tracking ------------------------------------------------ #
+    next_follow_up_date = Column(DateTime, nullable=True)
+    last_contacted_at = Column(DateTime, nullable=True)
+    contact_count = Column(Integer, default=0)
+
     def signals(self) -> list[str]:
         try:
             return json.loads(self.distress_signals or "[]")
         except (ValueError, TypeError):
             return []
 
+    def photos(self) -> list[str]:
+        try:
+            return json.loads(self.photo_urls or "[]")
+        except (ValueError, TypeError):
+            return []
+
     def to_dict(self) -> dict:
+        today = _now().date()
+
+        def _days_until(dt):
+            if not dt:
+                return None
+            d = dt.date() if isinstance(dt, datetime) else dt
+            return (d - today).days
+
         return {
             "id": self.id,
             "address": self.address,
@@ -154,6 +196,34 @@ class Lead(Base):
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "maps_key_present": bool(GOOGLE_MAPS_API_KEY),
+            # property characteristics
+            "beds": self.beds,
+            "baths": self.baths,
+            "sqft": self.sqft,
+            "year_built": self.year_built,
+            "lot_sqft": self.lot_sqft,
+            "property_type": self.property_type,
+            "occupancy": self.occupancy,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "photo_urls": self.photos(),
+            # deal terms
+            "arv": self.arv,
+            "repair_estimate": self.repair_estimate,
+            "asking_price": self.asking_price,
+            "assignment_fee_target": self.assignment_fee_target,
+            "earnest_money": self.earnest_money,
+            "contract_date": self.contract_date.isoformat() if self.contract_date else None,
+            "inspection_end_date": self.inspection_end_date.isoformat() if self.inspection_end_date else None,
+            "close_date": self.close_date.isoformat() if self.close_date else None,
+            # follow-up
+            "next_follow_up_date": self.next_follow_up_date.isoformat() if self.next_follow_up_date else None,
+            "last_contacted_at": self.last_contacted_at.isoformat() if self.last_contacted_at else None,
+            "contact_count": self.contact_count or 0,
+            # computed countdowns
+            "days_until_follow_up": _days_until(self.next_follow_up_date),
+            "days_to_inspection_end": _days_until(self.inspection_end_date),
+            "days_to_close": _days_until(self.close_date),
         }
 
 
@@ -178,6 +248,26 @@ class Buyer(Base):
     source = Column(String, default="manual")
     created_at = Column(DateTime, default=_now)
 
+    # --- Buy box (used for deal matching) ---------------------------------- #
+    target_cities = Column(Text, default="")    # comma-separated
+    target_zips = Column(Text, default="")      # comma-separated
+    target_counties = Column(Text, default="")  # comma-separated
+    min_beds = Column(Float, default=0.0)
+    max_rehab = Column(Float, default=0.0)      # max repair budget they'll take on
+    asset_types = Column(Text, default="")      # e.g. "Single Family, Duplex"
+    recent_cash_deals = Column(Integer, default=0)
+    active = Column(Boolean, default=True)
+
+    # --- Proof of funds ---------------------------------------------------- #
+    pof_received = Column(Boolean, default=False)
+    pof_amount = Column(Float, default=0.0)
+    pof_date = Column(DateTime, nullable=True)
+    pof_expires = Column(DateTime, nullable=True)
+    last_deal_sent_at = Column(DateTime, nullable=True)
+
+    def _csv(self, raw) -> list[str]:
+        return [s.strip() for s in (raw or "").split(",") if s.strip()]
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -197,6 +287,19 @@ class Buyer(Base):
             "cash_buyer_score": round(self.cash_buyer_score, 1),
             "source": self.source,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "target_cities": self._csv(self.target_cities),
+            "target_zips": self._csv(self.target_zips),
+            "target_counties": self._csv(self.target_counties),
+            "min_beds": self.min_beds,
+            "max_rehab": self.max_rehab,
+            "asset_types": self._csv(self.asset_types),
+            "recent_cash_deals": self.recent_cash_deals or 0,
+            "active": bool(self.active),
+            "pof_received": bool(self.pof_received),
+            "pof_amount": self.pof_amount,
+            "pof_date": self.pof_date.isoformat() if self.pof_date else None,
+            "pof_expires": self.pof_expires.isoformat() if self.pof_expires else None,
+            "last_deal_sent_at": self.last_deal_sent_at.isoformat() if self.last_deal_sent_at else None,
         }
 
 
@@ -262,7 +365,73 @@ class DealLog(Base):
         }
 
 
+class ContactLog(Base):
+    __tablename__ = "contact_logs"
+
+    id = Column(String, primary_key=True, default=_uid)
+    lead_id = Column(String, nullable=False, default="")
+    channel = Column(String, default="call")     # call | text | email | voicemail | door | other
+    outcome = Column(String, default="")          # no_answer | left_vm | spoke | callback | not_interested | appointment
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=_now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "lead_id": self.lead_id,
+            "channel": self.channel,
+            "outcome": self.outcome,
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 Base.metadata.create_all(engine)
+
+
+def ensure_schema() -> None:
+    """
+    Lightweight forward-only migration: add any model columns that are missing
+    from existing tables. create_all() only creates *new* tables, so this is how
+    new columns reach a database that was created by an earlier version.
+    Safe to run on every boot; it only ever ADDs missing columns.
+    """
+    from sqlalchemy import inspect as _sa_inspect, text as _sa_text
+
+    dialect = engine.dialect.name  # 'sqlite' | 'postgresql'
+
+    def sql_type(col) -> str:
+        t = col.type.__class__.__name__.lower()
+        if "boolean" in t:
+            return "BOOLEAN"
+        if "integer" in t:
+            return "INTEGER"
+        if "float" in t or "numeric" in t:
+            return "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"
+        if "datetime" in t:
+            return "TIMESTAMP"
+        return "TEXT"
+
+    insp = _sa_inspect(engine)
+    existing_tables = set(insp.get_table_names())
+
+    with engine.begin() as conn:
+        for table_name, model in Base.metadata.tables.items():
+            if table_name not in existing_tables:
+                continue
+            have = {c["name"] for c in insp.get_columns(table_name)}
+            for col in model.columns:
+                if col.name in have:
+                    continue
+                ddl = f'ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type(col)}'
+                try:
+                    conn.execute(_sa_text(ddl))
+                    print(f"[migrate] {table_name}.{col.name} added")
+                except Exception as exc:  # already exists / race / dialect quirk
+                    print(f"[migrate] skip {table_name}.{col.name}: {exc}")
+
+
+ensure_schema()
 
 
 def get_db():
@@ -1159,11 +1328,22 @@ def trigger_run(payload: RunInput, db: Session = Depends(get_db)):
             county=raw_lead.get("county", ""),
             owner_name=raw_lead.get("owner_name", ""),
             owner_address=raw_lead.get("owner_address", ""),
+            owner_phone=raw_lead.get("owner_phone", ""),
+            owner_email=raw_lead.get("owner_email", ""),
             est_value=raw_lead.get("est_value", 0.0),
             est_equity_pct=raw_lead.get("est_equity_pct", 0.0),
             tax_delinquent=raw_lead.get("tax_delinquent", False),
             days_on_market=raw_lead.get("days_on_market", 0),
             distress_signals=json.dumps(raw_lead.get("distress_signals") or reasons),
+            beds=raw_lead.get("beds", 0.0),
+            baths=raw_lead.get("baths", 0.0),
+            sqft=raw_lead.get("sqft", 0.0),
+            year_built=raw_lead.get("year_built", 0),
+            lot_sqft=raw_lead.get("lot_sqft", 0.0),
+            property_type=raw_lead.get("property_type", "Single Family"),
+            occupancy=raw_lead.get("occupancy", ""),
+            latitude=raw_lead.get("latitude", 0.0),
+            longitude=raw_lead.get("longitude", 0.0),
             source=src_name,
             base_score=base,
             final_score=base,
@@ -1185,6 +1365,15 @@ def trigger_run(payload: RunInput, db: Session = Depends(get_db)):
             state=raw_buyer.get("state", "TX"),
             budget_min=raw_buyer.get("budget_min", 0.0),
             budget_max=raw_buyer.get("budget_max", 0.0),
+            target_cities=raw_buyer.get("target_cities", ""),
+            target_zips=raw_buyer.get("target_zips", ""),
+            target_counties=raw_buyer.get("target_counties", ""),
+            min_beds=raw_buyer.get("min_beds", 0.0),
+            max_rehab=raw_buyer.get("max_rehab", 0.0),
+            asset_types=raw_buyer.get("asset_types", ""),
+            recent_cash_deals=raw_buyer.get("recent_cash_deals", 0),
+            pof_received=raw_buyer.get("pof_received", False),
+            pof_amount=raw_buyer.get("pof_amount", 0.0),
             cash_buyer_score=cash_buyer_score(raw_buyer),
             source=src_name,
         )
@@ -1227,11 +1416,31 @@ def dashboard_stats(db: Session = Depends(get_db)):
         by_status[stage] = db.execute(
             select(func.count(Lead.id)).where(Lead.status == stage)
         ).scalar() or 0
+
+    # Follow-ups due today/overdue + deadlines within 7 days.
+    now = _now()
+    followups_due = 0
+    deadlines_week = 0
+    for l in db.execute(select(Lead)).scalars().all():
+        if l.next_follow_up_date:
+            due = l.next_follow_up_date
+            due = due.replace(tzinfo=timezone.utc) if due.tzinfo is None else due
+            if (due.date() - now.date()).days <= 0:
+                followups_due += 1
+        for dt in (l.inspection_end_date, l.close_date):
+            if dt:
+                d = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+                if 0 <= (d.date() - now.date()).days <= 7:
+                    deadlines_week += 1
+                    break
+
     return {
         "total_leads": total_leads,
         "total_buyers": total_buyers,
         "hot_leads": hot,
         "pipeline": by_status,
+        "follow_ups_due": followups_due,
+        "deadlines_this_week": deadlines_week,
         "config": {
             "maps_key_present": bool(GOOGLE_MAPS_API_KEY),
             "claude_present": bool(ANTHROPIC_API_KEY),
@@ -1260,6 +1469,711 @@ def config_js():
         f"window.APP_CONFIG = {{ mapsKey: {json.dumps(key)} }};",
         media_type="application/javascript",
     )
+
+
+# ===========================================================================
+# WHOLESALING WORKFLOW — comps/ARV, follow-ups, buyer matching, PI sheet,
+# deal terms & deadline tracking. (Added v1.1.0)
+# ===========================================================================
+
+# ----- Schemas ------------------------------------------------------------- #
+
+class CompInput(BaseModel):
+    address: str = ""
+    sale_price: float = 0.0
+    sqft: float = 0.0
+    sale_date: str = ""
+    beds: float = 0.0
+    baths: float = 0.0
+    year_built: int = 0
+    distance_mi: float = 0.0
+
+
+class CompsRequest(BaseModel):
+    lead_id: str = ""
+    subject_sqft: float = 0.0
+    subject_beds: float = 0.0
+    subject_baths: float = 0.0
+    property_type: str = ""
+    postal_code: str = ""
+    city: str = ""
+    state: str = "TX"
+    latitude: float = 0.0
+    longitude: float = 0.0
+    radius_mi: float = 1.0
+    months_back: int = 6
+    sqft_tolerance_pct: float = 25.0     # comps within +/- this % of subject GLA
+    repair_estimate: float = 0.0
+    comps: list[CompInput] = Field(default_factory=list)   # manual comps (optional)
+    save: bool = False                    # write ARV/repair back to the lead
+
+
+class ContactLogInput(BaseModel):
+    channel: str = "call"
+    outcome: str = ""
+    notes: str = ""
+    next_follow_up_in_days: int | None = None
+    next_follow_up_date: str | None = None
+
+
+class DealTermsInput(BaseModel):
+    arv: float | None = None
+    repair_estimate: float | None = None
+    asking_price: float | None = None
+    assignment_fee_target: float | None = None
+    earnest_money: float | None = None
+    beds: float | None = None
+    baths: float | None = None
+    sqft: float | None = None
+    year_built: int | None = None
+    lot_sqft: float | None = None
+    property_type: str | None = None
+    occupancy: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    photo_urls: list[str] | None = None
+    contract_date: str | None = None
+    inspection_end_date: str | None = None
+    close_date: str | None = None
+
+
+class BuyerUpdate(BaseModel):
+    name: str | None = None
+    entity_type: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    city: str | None = None
+    state: str | None = None
+    budget_min: float | None = None
+    budget_max: float | None = None
+    target_cities: str | None = None
+    target_zips: str | None = None
+    target_counties: str | None = None
+    min_beds: float | None = None
+    max_rehab: float | None = None
+    asset_types: str | None = None
+    recent_cash_deals: int | None = None
+    active: bool | None = None
+    notes: str | None = None
+
+
+class PofInput(BaseModel):
+    pof_received: bool = True
+    pof_amount: float = 0.0
+    pof_date: str | None = None
+    pof_expires: str | None = None
+
+
+# ----- Date helpers -------------------------------------------------------- #
+
+def _parse_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    txt = str(s).strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        try:
+            return datetime.strptime(txt[:len(fmt) + 6] if "%f" in fmt else txt[:len(fmt)], fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(txt.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+# ----- ARV from comparable sales ------------------------------------------- #
+
+def compute_arv(
+    subject_sqft: float,
+    comps: list[dict],
+    *,
+    sqft_tolerance_pct: float = 25.0,
+    trim_outliers: bool = True,
+) -> dict:
+    """
+    Quick-and-defensible ARV: take qualified sold comps, compute $/sqft for each,
+    use the median $/sqft applied to the subject's GLA. Returns ARV plus a range,
+    a confidence rating, and the per-comp breakdown so the number is auditable.
+    """
+    qualified: list[dict] = []
+    excluded: list[dict] = []
+    lo = subject_sqft * (1 - sqft_tolerance_pct / 100.0) if subject_sqft else 0
+    hi = subject_sqft * (1 + sqft_tolerance_pct / 100.0) if subject_sqft else 0
+
+    for c in comps:
+        price = float(c.get("sale_price") or 0)
+        sqft = float(c.get("sqft") or 0)
+        if price <= 0 or sqft <= 0:
+            excluded.append({**c, "reason": "missing price or sqft"})
+            continue
+        if subject_sqft and not (lo <= sqft <= hi):
+            excluded.append({**c, "reason": f"sqft {sqft:.0f} outside ±{sqft_tolerance_pct:.0f}% band"})
+            continue
+        ppsf = price / sqft
+        qualified.append({**c, "ppsf": round(ppsf, 2)})
+
+    if not qualified:
+        return {
+            "arv": 0.0, "arv_low": 0.0, "arv_high": 0.0,
+            "ppsf_median": 0.0, "confidence": "none",
+            "qualified_count": 0, "comps_used": [], "comps_excluded": excluded,
+            "note": "No comps met the filters — widen the sqft tolerance, radius, or date window, or enter comps manually.",
+        }
+
+    ppsfs = sorted(c["ppsf"] for c in qualified)
+
+    # Optional light outlier trim (drop top & bottom) when we have enough comps.
+    if trim_outliers and len(ppsfs) >= 5:
+        ppsfs_trimmed = ppsfs[1:-1]
+    else:
+        ppsfs_trimmed = ppsfs
+
+    median_ppsf = statistics.median(ppsfs_trimmed)
+
+    def _quantile(data: list[float], q: float) -> float:
+        if len(data) == 1:
+            return data[0]
+        pos = (len(data) - 1) * q
+        lower = int(pos)
+        frac = pos - lower
+        if lower + 1 < len(data):
+            return data[lower] + (data[lower + 1] - data[lower]) * frac
+        return data[lower]
+
+    p25 = _quantile(ppsfs_trimmed, 0.25)
+    p75 = _quantile(ppsfs_trimmed, 0.75)
+
+    arv = median_ppsf * subject_sqft if subject_sqft else median_ppsf
+    arv_low = p25 * subject_sqft if subject_sqft else p25
+    arv_high = p75 * subject_sqft if subject_sqft else p75
+
+    # Confidence from sample size + dispersion (coefficient of variation).
+    n = len(qualified)
+    cv = (statistics.pstdev(ppsfs) / statistics.mean(ppsfs)) if len(ppsfs) >= 2 and statistics.mean(ppsfs) else 0
+    if n >= 5 and cv < 0.15:
+        confidence = "high"
+    elif n >= 3:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "arv": round(arv, 0),
+        "arv_low": round(arv_low, 0),
+        "arv_high": round(arv_high, 0),
+        "ppsf_median": round(median_ppsf, 2),
+        "ppsf_spread": {"p25": round(p25, 2), "p75": round(p75, 2)},
+        "coefficient_of_variation": round(cv, 3),
+        "confidence": confidence,
+        "qualified_count": n,
+        "comps_used": sorted(qualified, key=lambda x: x.get("distance_mi") or 0)[:25],
+        "comps_excluded": excluded[:25],
+        "subject_sqft": subject_sqft,
+        "note": "ARV = median $/sqft of qualified sold comps × subject sqft. Always sanity-check against a full walkthrough and a local agent's BPO.",
+    }
+
+
+@app.post("/api/comps")
+def comps_endpoint(req: CompsRequest, db: Session = Depends(get_db)):
+    """
+    Compute ARV from comps. Uses manually-supplied comps when provided; otherwise
+    pulls sold comps from ATTOM (when reachable). Optionally writes the ARV and
+    repair estimate back onto the lead.
+    """
+    lead = db.get(Lead, req.lead_id) if req.lead_id else None
+
+    subject_sqft = req.subject_sqft or (lead.sqft if lead else 0) or 0
+    property_type = req.property_type or (lead.property_type if lead else "") or ""
+    postal = req.postal_code or (lead.zip_code if lead else "")
+    city = req.city or (lead.city if lead else "")
+    state = req.state or (lead.state if lead else "TX")
+    lat = req.latitude or (lead.latitude if lead else 0) or 0
+    lon = req.longitude or (lead.longitude if lead else 0) or 0
+
+    comps = [c.model_dump() for c in req.comps]
+    source = "manual"
+
+    if not comps:
+        pulled = source_engine.fetch_sales_comps(
+            postal_code=postal, city=city, state=state,
+            latitude=lat, longitude=lon, radius_mi=req.radius_mi,
+            months_back=req.months_back, property_type=property_type,
+        )
+        if pulled:
+            comps = pulled
+            source = "attom"
+
+    if not comps:
+        return {
+            "source": "none",
+            "arv": 0.0,
+            "note": "No comps available. ATTOM is unreachable or returned nothing — "
+                    "enter sold comps manually (address, sqft, sale price) to compute an ARV.",
+            "qualified_count": 0,
+        }
+
+    result = compute_arv(subject_sqft, comps, sqft_tolerance_pct=req.sqft_tolerance_pct)
+    result["source"] = source
+
+    if req.save and lead:
+        lead.arv = result["arv"]
+        if req.repair_estimate:
+            lead.repair_estimate = req.repair_estimate
+        db.commit()
+        result["saved_to_lead"] = lead.id
+
+    return result
+
+
+# ----- Follow-up tracking -------------------------------------------------- #
+
+# "The fortune is in the follow-up." A sensible default touch cadence (days from
+# today) indexed by how many times you've already reached out.
+_FOLLOWUP_CADENCE = [1, 3, 7, 14, 30]
+
+
+def default_followup_days(touch_count: int) -> int:
+    if touch_count < len(_FOLLOWUP_CADENCE):
+        return _FOLLOWUP_CADENCE[touch_count]
+    return 30  # steady monthly cadence after the initial sequence
+
+
+@app.post("/api/leads/{lead_id}/contact-log")
+def add_contact_log(lead_id: str, payload: ContactLogInput, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+
+    log = ContactLog(
+        lead_id=lead_id,
+        channel=payload.channel or "call",
+        outcome=payload.outcome or "",
+        notes=payload.notes or "",
+    )
+    db.add(log)
+
+    lead.contact_count = (lead.contact_count or 0) + 1
+    lead.last_contacted_at = _now()
+
+    # Determine next follow-up date: explicit date > explicit days > cadence default.
+    nxt = _parse_date(payload.next_follow_up_date)
+    if not nxt and payload.next_follow_up_in_days is not None:
+        nxt = _now() + timedelta(days=max(0, payload.next_follow_up_in_days))
+    if not nxt:
+        nxt = _now() + timedelta(days=default_followup_days(lead.contact_count))
+    lead.next_follow_up_date = nxt
+
+    # Auto-advance a brand-new lead to "Contacted" on first logged touch.
+    if lead.status == "New":
+        lead.status = "Contacted"
+
+    db.commit()
+    return {
+        "logged": log.to_dict(),
+        "lead": lead.to_dict(),
+        "next_follow_up_date": nxt.isoformat(),
+    }
+
+
+@app.get("/api/leads/{lead_id}/contact-log")
+def get_contact_log(lead_id: str, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    stmt = select(ContactLog).where(ContactLog.lead_id == lead_id).order_by(ContactLog.created_at.desc())
+    logs = db.execute(stmt).scalars().all()
+    return {"lead_id": lead_id, "count": len(logs), "logs": [l.to_dict() for l in logs]}
+
+
+@app.get("/api/follow-ups/due")
+def follow_ups_due(window: str = Query("today"), db: Session = Depends(get_db)):
+    """
+    window: 'overdue' (past due only), 'today' (due on/before today),
+            'week' (due within 7 days), 'all' (any scheduled follow-up).
+    """
+    now = _now()
+    stmt = select(Lead).where(Lead.next_follow_up_date.isnot(None))
+    leads = db.execute(stmt).scalars().all()
+
+    out = []
+    for l in leads:
+        due = l.next_follow_up_date
+        if due is None:
+            continue
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        delta_days = (due.date() - now.date()).days
+        keep = (
+            (window == "overdue" and delta_days < 0) or
+            (window == "today" and delta_days <= 0) or
+            (window == "week" and delta_days <= 7) or
+            (window == "all")
+        )
+        if keep:
+            d = l.to_dict()
+            d["due_in_days"] = delta_days
+            out.append(d)
+
+    out.sort(key=lambda x: x["due_in_days"])
+    return {"window": window, "count": len(out), "leads": out}
+
+
+# ----- Buyer matching ------------------------------------------------------ #
+
+def _estimated_offer_to_buyer(lead: Lead) -> float:
+    """What you'd realistically list this deal to a cash buyer for."""
+    if lead.asking_price:
+        return lead.asking_price
+    if lead.arv:
+        # 70% rule, net of repairs, leaving your assignment fee inside the spread.
+        return max(lead.arv * 0.70 - (lead.repair_estimate or 0), 0)
+    if lead.est_value:
+        return lead.est_value * 0.65
+    return 0.0
+
+
+def match_buyers_for_lead(lead: Lead, buyers: list[Buyer]) -> list[dict]:
+    ask = _estimated_offer_to_buyer(lead)
+    lead_city = (lead.city or "").strip().lower()
+    lead_county = (lead.county or "").strip().lower()
+    lead_zip = (lead.zip_code or "").strip()
+    lead_ptype = (lead.property_type or "").strip().lower()
+    now = _now()
+
+    results = []
+    for b in buyers:
+        score = 0.0
+        reasons: list[str] = []
+
+        # Price fit (35)
+        bmin, bmax = (b.budget_min or 0), (b.budget_max or 0)
+        if ask and bmax > 0:
+            if bmin <= ask <= bmax:
+                score += 35; reasons.append(f"Price {fmt_money_plain(ask)} fits budget")
+            elif bmax * 0.9 <= ask <= bmax * 1.1 or (bmin and bmin * 0.9 <= ask <= bmin * 1.1):
+                score += 20; reasons.append("Price near budget edge")
+        elif bmax == 0:
+            score += 15; reasons.append("Budget not specified")
+
+        # Geo fit (25)
+        zips = b._csv(b.target_zips)
+        cities = [c.lower() for c in b._csv(b.target_cities)]
+        counties = [c.lower() for c in b._csv(b.target_counties)]
+        if lead_zip and lead_zip in zips:
+            score += 25; reasons.append(f"Targets ZIP {lead_zip}")
+        elif (lead_city and lead_city in cities) or (lead_county and lead_county in counties):
+            score += 18; reasons.append("In target city/county")
+        elif not zips and not cities and not counties:
+            score += 10; reasons.append("No geo filter set")
+
+        # Asset type (10)
+        assets = [a.lower() for a in b._csv(b.asset_types)]
+        if not assets or (lead_ptype and lead_ptype in assets):
+            score += 10
+            if assets:
+                reasons.append("Asset type match")
+
+        # Beds (5)
+        if not (b.min_beds or 0) or (lead.beds or 0) >= (b.min_beds or 0):
+            score += 5
+
+        # Rehab capacity (10)
+        if not (b.max_rehab or 0):
+            score += 7
+        elif (lead.repair_estimate or 0) <= b.max_rehab:
+            score += 10; reasons.append("Rehab within their budget")
+
+        # Proof of funds (8)
+        if b.pof_received:
+            expired = b.pof_expires and (b.pof_expires.replace(tzinfo=timezone.utc) if b.pof_expires.tzinfo is None else b.pof_expires) < now
+            if not expired:
+                score += 8; reasons.append("Proof of funds on file")
+
+        # Recent activity (up to 7)
+        score += min(b.recent_cash_deals or 0, 7)
+        if (b.recent_cash_deals or 0) >= 3:
+            reasons.append(f"{b.recent_cash_deals} recent cash deals")
+
+        d = b.to_dict()
+        d["match_score"] = round(min(score, 100), 1)
+        d["match_reasons"] = reasons
+        results.append(d)
+
+    results.sort(key=lambda x: x["match_score"], reverse=True)
+    return results
+
+
+@app.get("/api/leads/{lead_id}/matched-buyers")
+def matched_buyers(lead_id: str, include_inactive: bool = False, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    stmt = select(Buyer)
+    buyers = db.execute(stmt).scalars().all()
+    if not include_inactive:
+        buyers = [b for b in buyers if b.active]
+    ranked = match_buyers_for_lead(lead, buyers)
+    return {
+        "lead_id": lead_id,
+        "estimated_offer_to_buyer": round(_estimated_offer_to_buyer(lead), 0),
+        "count": len(ranked),
+        "buyers": ranked,
+    }
+
+
+# ----- Deal terms & deadlines ---------------------------------------------- #
+
+@app.put("/api/leads/{lead_id}/deal-terms")
+def update_deal_terms(lead_id: str, payload: DealTermsInput, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    date_fields = {"contract_date", "inspection_end_date", "close_date"}
+    for k, v in data.items():
+        if k in date_fields:
+            setattr(lead, k, _parse_date(v))
+        elif k == "photo_urls":
+            lead.photo_urls = json.dumps(v or [])
+        else:
+            setattr(lead, k, v)
+    db.commit()
+    return lead.to_dict()
+
+
+@app.get("/api/deals/deadlines")
+def deal_deadlines(db: Session = Depends(get_db)):
+    """Every lead with an inspection or closing deadline, soonest first."""
+    now = _now()
+    stmt = select(Lead).where(
+        (Lead.inspection_end_date.isnot(None)) | (Lead.close_date.isnot(None))
+    )
+    leads = db.execute(stmt).scalars().all()
+
+    out = []
+    for l in leads:
+        events = []
+        for label, dt in (("Inspection ends", l.inspection_end_date), ("Closing", l.close_date)):
+            if dt:
+                d = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+                events.append({"label": label, "date": d.date().isoformat(), "days_remaining": (d.date() - now.date()).days})
+        if events:
+            row = l.to_dict()
+            row["deadlines"] = sorted(events, key=lambda e: e["days_remaining"])
+            row["soonest_days"] = row["deadlines"][0]["days_remaining"]
+            out.append(row)
+
+    out.sort(key=lambda x: x["soonest_days"])
+    return {"count": len(out), "deals": out}
+
+
+# ----- Buyer update / proof of funds --------------------------------------- #
+
+@app.put("/api/buyers/{buyer_id}")
+def update_buyer(buyer_id: str, payload: BuyerUpdate, db: Session = Depends(get_db)):
+    buyer = db.get(Buyer, buyer_id)
+    if not buyer:
+        raise HTTPException(404, "Buyer not found")
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(buyer, k, v)
+    if "recent_cash_deals" in data or "budget_max" in data or "entity_type" in data:
+        buyer.cash_buyer_score = cash_buyer_score({
+            "entity_type": buyer.entity_type or "",
+            "recent_cash_deals": buyer.recent_cash_deals or 0,
+            "budget_max": buyer.budget_max or 0,
+        })
+    db.commit()
+    return buyer.to_dict()
+
+
+@app.put("/api/buyers/{buyer_id}/pof")
+def update_buyer_pof(buyer_id: str, payload: PofInput, db: Session = Depends(get_db)):
+    buyer = db.get(Buyer, buyer_id)
+    if not buyer:
+        raise HTTPException(404, "Buyer not found")
+    buyer.pof_received = payload.pof_received
+    buyer.pof_amount = payload.pof_amount
+    buyer.pof_date = _parse_date(payload.pof_date) or (_now() if payload.pof_received else None)
+    buyer.pof_expires = _parse_date(payload.pof_expires)
+    db.commit()
+    return buyer.to_dict()
+
+
+# ----- Property info sheet (PI sheet) -------------------------------------- #
+
+def fmt_money_plain(v) -> str:
+    try:
+        return "${:,.0f}".format(float(v or 0))
+    except (TypeError, ValueError):
+        return "$0"
+
+
+def build_pi_sheet_html(lead: Lead) -> str:
+    arv = lead.arv or 0
+    repair = lead.repair_estimate or 0
+    ask = lead.asking_price or _estimated_offer_to_buyer(lead)
+    spread = arv - ask - repair
+    photos = lead.photos()
+    sigs = lead.signals()
+
+    photo_html = ""
+    if photos:
+        photo_html = '<div class="photos">' + "".join(
+            f'<img src="{p}" alt="property photo">' for p in photos[:6]
+        ) + "</div>"
+
+    facts = [
+        ("Beds", f"{lead.beds:g}" if lead.beds else "—"),
+        ("Baths", f"{lead.baths:g}" if lead.baths else "—"),
+        ("Sq Ft", f"{lead.sqft:,.0f}" if lead.sqft else "—"),
+        ("Year built", f"{lead.year_built}" if lead.year_built else "—"),
+        ("Lot", f"{lead.lot_sqft:,.0f} sqft" if lead.lot_sqft else "—"),
+        ("Type", lead.property_type or "—"),
+        ("Occupancy", lead.occupancy or "—"),
+        ("County", lead.county or "—"),
+    ]
+    facts_html = "".join(f'<div class="fact"><span>{k}</span><b>{v}</b></div>' for k, v in facts)
+
+    close_line = ""
+    if lead.close_date:
+        close_line = f"<b>Target close:</b> {lead.close_date.date().isoformat()} &nbsp;·&nbsp; "
+    em_line = f"<b>Earnest money:</b> {fmt_money_plain(lead.earnest_money)}" if lead.earnest_money else ""
+
+    sig_html = ""
+    if sigs:
+        sig_html = '<div class="sigs">' + "".join(f"<span>{s}</span>" for s in sigs) + "</div>"
+
+    spread_color = "#15803d" if spread > 0 else "#b91c1c"
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Property Info — {esc_html(lead.address)}</title>
+<style>
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#0f172a; margin:0; background:#f1f5f9; }}
+  .sheet {{ max-width: 820px; margin: 24px auto; background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 10px 40px rgba(2,6,23,.15); }}
+  .hero {{ background: linear-gradient(135deg,#0b1220,#1e293b); color:#fff; padding:26px 30px; }}
+  .hero .eyebrow {{ text-transform:uppercase; letter-spacing:.16em; font-size:11px; color:#67e8f9; font-weight:700; }}
+  .hero h1 {{ margin:6px 0 2px; font-size:26px; }}
+  .hero .loc {{ color:#cbd5e1; font-size:15px; }}
+  .photos {{ display:grid; grid-template-columns:repeat(3,1fr); gap:3px; background:#0b1220; }}
+  .photos img {{ width:100%; height:150px; object-fit:cover; display:block; }}
+  .body {{ padding: 24px 30px 30px; }}
+  .nums {{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:0 0 22px; }}
+  .num {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; }}
+  .num span {{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#64748b; font-weight:700; }}
+  .num b {{ font-size:21px; }}
+  .facts {{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:22px; }}
+  .fact {{ border-bottom:1px solid #eef2f7; padding:6px 0; }}
+  .fact span {{ display:block; font-size:11px; color:#64748b; }}
+  .fact b {{ font-size:15px; }}
+  .sigs {{ margin:8px 0 20px; }}
+  .sigs span {{ display:inline-block; background:#fef3c7; color:#92400e; border-radius:99px; padding:3px 10px; font-size:12px; font-weight:600; margin:0 6px 6px 0; }}
+  h3 {{ margin:18px 0 8px; font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:#334155; }}
+  .terms {{ font-size:14px; color:#334155; line-height:1.7; }}
+  .disc {{ margin-top:22px; padding:14px 16px; background:#f8fafc; border-left:3px solid #94a3b8; border-radius:6px; font-size:12px; color:#475569; line-height:1.6; }}
+  .printbar {{ text-align:center; margin:16px; }}
+  .printbar button {{ background:#0ea5e9; color:#fff; border:0; padding:11px 22px; border-radius:9px; font-size:14px; font-weight:700; cursor:pointer; }}
+  @media print {{ body {{ background:#fff; }} .sheet {{ box-shadow:none; margin:0; }} .printbar {{ display:none; }} }}
+</style></head>
+<body>
+<div class="printbar"><button onclick="window.print()">Print / Save as PDF</button></div>
+<div class="sheet">
+  <div class="hero">
+    <div class="eyebrow">Investment Property · Off-Market</div>
+    <h1>{esc_html(lead.address)}</h1>
+    <div class="loc">{esc_html(lead.city)}, {esc_html(lead.state)} {esc_html(lead.zip_code)}</div>
+  </div>
+  {photo_html}
+  <div class="body">
+    <div class="nums">
+      <div class="num"><span>ARV</span><b>{fmt_money_plain(arv)}</b></div>
+      <div class="num"><span>Est. Repairs</span><b>{fmt_money_plain(repair)}</b></div>
+      <div class="num"><span>Asking Price</span><b>{fmt_money_plain(ask)}</b></div>
+      <div class="num"><span>Spread</span><b style="color:{spread_color}">{fmt_money_plain(spread)}</b></div>
+    </div>
+    <h3>Property details</h3>
+    <div class="facts">{facts_html}</div>
+    {('<h3>Why it&#39;s a deal</h3>' + sig_html) if sig_html else ''}
+    <h3>Terms</h3>
+    <div class="terms">{close_line}{em_line}<br>
+      Cash or hard money, as-is, buyer covers closing. Assignable contract — assignment fee included in asking price.
+    </div>
+    <div class="disc">
+      Figures are estimates provided in good faith and are not guaranteed. Buyer is responsible for independently
+      verifying ARV, repair costs, square footage, condition, title, and all material facts before purchase.
+      This is a wholesale assignment of an equitable interest in a purchase contract, not a listing by a licensed
+      broker. Property sold strictly as-is, where-is.
+    </div>
+  </div>
+</div>
+</body></html>"""
+
+
+def esc_html(s) -> str:
+    return (str(s or "")
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+@app.get("/api/leads/{lead_id}/pi-sheet", response_class=HTMLResponse)
+def pi_sheet(lead_id: str, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    return HTMLResponse(build_pi_sheet_html(lead))
+
+
+# ----- Buyer blast (generates messages; does not send) --------------------- #
+
+@app.post("/api/leads/{lead_id}/blast")
+def blast_deal(lead_id: str, limit: int = 10, db: Session = Depends(get_db)):
+    """
+    Build a ready-to-send deal blast for the best-matched buyers. Returns the
+    matched buyer list plus email and SMS copy. It does NOT send anything —
+    review and send from your own email/phone.
+    """
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    buyers = [b for b in db.execute(select(Buyer)).scalars().all() if b.active]
+    ranked = match_buyers_for_lead(lead, buyers)[:limit]
+
+    ask = lead.asking_price or _estimated_offer_to_buyer(lead)
+    arv = lead.arv or 0
+    repair = lead.repair_estimate or 0
+    loc = f"{lead.city}, {lead.state} {lead.zip_code}".strip()
+
+    subject = f"Off-market deal: {lead.address} — {fmt_money_plain(ask)}"
+    email_body = (
+        f"Hi {{name}},\n\n"
+        f"New off-market wholesale deal in {loc}:\n\n"
+        f"Address: {lead.address}\n"
+        f"ARV: {fmt_money_plain(arv)}\n"
+        f"Estimated repairs: {fmt_money_plain(repair)}\n"
+        f"Asking (assignment included): {fmt_money_plain(ask)}\n"
+        + (f"Beds/Baths/SqFt: {lead.beds:g}/{lead.baths:g}/{lead.sqft:,.0f}\n" if lead.sqft else "")
+        + (f"Target close: {lead.close_date.date().isoformat()}\n" if lead.close_date else "")
+        + "\nCash or hard money, as-is, assignable contract. Reply or call if you want the full property info sheet "
+        "and access details. First with proof of funds and earnest money locks it.\n\n"
+        "Thanks!"
+    )
+    sms_body = (
+        f"Off-market deal {lead.address}, {loc}. ARV {fmt_money_plain(arv)}, "
+        f"repairs ~{fmt_money_plain(repair)}, asking {fmt_money_plain(ask)}. "
+        "Cash/as-is, assignable. Want the PI sheet? Reply YES."
+    )
+
+    return {
+        "lead_id": lead_id,
+        "matched_buyers": ranked,
+        "email": {"subject": subject, "body": email_body},
+        "sms": {"body": sms_body},
+        "note": "Personalize {name} per buyer. Review before sending — nothing is sent automatically.",
+    }
 
 
 # ── ATTOM / NETWORK DEBUG ENDPOINTS ──────────────────────────────────────── #

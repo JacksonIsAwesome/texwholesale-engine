@@ -3,20 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pipeline · TexWholesale Engine</title>
+<title>Follow-ups · TexWholesale Engine</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/dashboard/styles.css">
 </head>
-<body data-page="pipeline">
+<body data-page="followups">
 <nav class="nav"><div class="brand"><span class="dot"></span>TEX<span class="tx">·</span>Wholesale</div><div class="nav-links"><a data-page="home" href="/dashboard/index.html">Overview</a><a data-page="leads" href="/dashboard/leads.html">Leads</a><a data-page="followups" href="/dashboard/followups.html">Follow-ups</a><a data-page="pipeline" href="/dashboard/pipeline.html">Pipeline</a><a data-page="deals" href="/dashboard/deals.html">Deals</a><a data-page="buyers" href="/dashboard/buyers.html">Buyers</a><a data-page="calculator" href="/dashboard/calculator.html">Calculator</a><a data-page="templates" href="/dashboard/templates.html">Templates</a><a data-page="import" href="/dashboard/import.html">Import</a><a data-page="settings" href="/dashboard/settings.html">Settings</a></div><div class="spacer"></div><div class="status-chip off" id="health-chip"><span class="led"></span>…</div></nav>
 <main class="wrap">
 
-<div class="page-head">
-  <div class="eyebrow">CRM</div>
-  <h1>Pipeline</h1>
-  <p>Move deals through the funnel. Status updates save instantly.</p>
+<div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px">
+  <div>
+    <div class="eyebrow">The fortune is in the follow-up</div>
+    <h1>Follow-ups</h1>
+    <p id="fu-count">…</p>
+  </div>
+  <div class="btn-row">
+    <select id="fu-window" style="width:auto">
+      <option value="today">Due today + overdue</option>
+      <option value="overdue">Overdue only</option>
+      <option value="week">Next 7 days</option>
+      <option value="all">All scheduled</option>
+    </select>
+  </div>
 </div>
-<div class="kanban" id="kanban"></div>
+<div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Due</th><th>Property</th><th>Owner</th><th>Phone</th><th>Touches</th><th>Log a touch</th></tr></thead>
+    <tbody id="fu-body"></tbody>
+  </table>
+</div>
+<div class="note">Logging a touch automatically schedules the next follow-up (1 → 3 → 7 → 14 → 30 days, then monthly) and moves a brand-new lead to Contacted.</div>
 
 </main>
 <div id="toasts"></div>

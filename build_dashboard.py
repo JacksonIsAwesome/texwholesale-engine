@@ -14,7 +14,9 @@ FONTS = (
 NAVLINKS = [
     ("home", "Overview", "/dashboard/index.html"),
     ("leads", "Leads", "/dashboard/leads.html"),
+    ("followups", "Follow-ups", "/dashboard/followups.html"),
     ("pipeline", "Pipeline", "/dashboard/pipeline.html"),
+    ("deals", "Deals", "/dashboard/deals.html"),
     ("buyers", "Buyers", "/dashboard/buyers.html"),
     ("calculator", "Calculator", "/dashboard/calculator.html"),
     ("templates", "Templates", "/dashboard/templates.html"),
@@ -154,10 +156,11 @@ buyers_body = """
 </div>
 <div class="tbl-wrap">
   <table>
-    <thead><tr><th>Score</th><th>Buyer</th><th>Contact</th><th>Budget</th><th>City</th><th>Source</th></tr></thead>
+    <thead><tr><th>Score</th><th>Buyer</th><th>Contact</th><th>Budget</th><th>Target area</th><th>POF</th></tr></thead>
     <tbody id="buyers-body"></tbody>
   </table>
 </div>
+<div class="note">Click a buyer to edit their buy box (target ZIPs/cities, max rehab, asset types) and proof-of-funds — these drive deal matching.</div>
 
 <div class="modal-backdrop" id="buyer-modal">
   <div class="modal">
@@ -179,6 +182,33 @@ buyers_body = """
     <div class="btn-row"><button class="btn primary" id="save-buyer">Save buyer</button>
       <button class="btn ghost" onclick="closeModal('buyer-modal')">Cancel</button></div>
     <div class="note">Name plus at least one of email or phone is required.</div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="buyer-edit-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('buyer-edit-modal')">&times;</button>
+    <h2 id="be-title">Edit buyer</h2>
+    <div class="grid cols-2">
+      <label class="field"><span class="lbl">Budget min</span><input id="be-bmin" type="number"></label>
+      <label class="field"><span class="lbl">Budget max</span><input id="be-bmax" type="number"></label>
+      <label class="field"><span class="lbl">Target ZIPs (comma-sep)</span><input id="be-zips" placeholder="75001, 75002"></label>
+      <label class="field"><span class="lbl">Target cities (comma-sep)</span><input id="be-cities"></label>
+      <label class="field"><span class="lbl">Target counties</span><input id="be-counties"></label>
+      <label class="field"><span class="lbl">Asset types</span><input id="be-assets" placeholder="Single Family, Duplex"></label>
+      <label class="field"><span class="lbl">Min beds</span><input id="be-minbeds" type="number" step="0.5"></label>
+      <label class="field"><span class="lbl">Max rehab budget</span><input id="be-maxrehab" type="number"></label>
+      <label class="field"><span class="lbl">Recent cash deals</span><input id="be-deals" type="number"></label>
+      <label class="field"><span class="lbl">Active</span><select id="be-active"><option value="true">Yes</option><option value="false">No</option></select></label>
+    </div>
+    <h3 style="margin-top:6px">Proof of funds</h3>
+    <div class="grid cols-3">
+      <label class="field"><span class="lbl">On file</span><select id="be-pof"><option value="false">No</option><option value="true">Yes</option></select></label>
+      <label class="field"><span class="lbl">Amount</span><input id="be-pofamt" type="number"></label>
+      <label class="field"><span class="lbl">Expires</span><input id="be-pofexp" placeholder="2026-12-31"></label>
+    </div>
+    <div class="btn-row"><button class="btn primary" onclick="saveBuyerEdit()">Save changes</button>
+      <button class="btn ghost" onclick="closeModal('buyer-edit-modal')">Cancel</button></div>
   </div>
 </div>
 """
@@ -345,5 +375,98 @@ settings_body = """
 </div>
 """
 write("settings.html", page("settings", "Settings", settings_body))
+
+# ---------------- follow-ups ----------------
+followups_body = """
+<div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px">
+  <div>
+    <div class="eyebrow">The fortune is in the follow-up</div>
+    <h1>Follow-ups</h1>
+    <p id="fu-count">…</p>
+  </div>
+  <div class="btn-row">
+    <select id="fu-window" style="width:auto">
+      <option value="today">Due today + overdue</option>
+      <option value="overdue">Overdue only</option>
+      <option value="week">Next 7 days</option>
+      <option value="all">All scheduled</option>
+    </select>
+  </div>
+</div>
+<div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Due</th><th>Property</th><th>Owner</th><th>Phone</th><th>Touches</th><th>Log a touch</th></tr></thead>
+    <tbody id="fu-body"></tbody>
+  </table>
+</div>
+<div class="note">Logging a touch automatically schedules the next follow-up (1 → 3 → 7 → 14 → 30 days, then monthly) and moves a brand-new lead to Contacted.</div>
+"""
+write("followups.html", page("followups", "Follow-ups", followups_body))
+
+# ---------------- deals (workspace + deadlines) ----------------
+deals_body = """
+<div class="page-head">
+  <div class="eyebrow">Disposition & closing</div>
+  <h1>Deals</h1>
+  <p>Set deal terms, pull comps, match buyers, print a property info sheet, and track deadlines.</p>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h3>Closing deadlines</h3>
+  <div id="deadlines"></div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <h3 style="margin:0">Deal workspace</h3>
+    <select id="deal-lead" style="width:auto;min-width:280px"><option value="">Select a lead…</option></select>
+  </div>
+
+  <div id="deal-panel" style="display:none;margin-top:18px">
+    <div class="grid cols-2">
+      <div>
+        <h3>Deal terms</h3>
+        <div class="grid cols-2">
+          <label class="field"><span class="lbl">ARV</span><input id="d-arv" type="number"></label>
+          <label class="field"><span class="lbl">Repair estimate</span><input id="d-repair" type="number"></label>
+          <label class="field"><span class="lbl">Asking price (assignment incl.)</span><input id="d-ask" type="number"></label>
+          <label class="field"><span class="lbl">Earnest money</span><input id="d-earnest" type="number"></label>
+          <label class="field"><span class="lbl">Beds</span><input id="d-beds" type="number" step="0.5"></label>
+          <label class="field"><span class="lbl">Baths</span><input id="d-baths" type="number" step="0.5"></label>
+          <label class="field"><span class="lbl">Sq ft</span><input id="d-sqft" type="number"></label>
+          <label class="field"><span class="lbl">Occupancy</span><input id="d-occ" placeholder="vacant / owner / tenant"></label>
+          <label class="field"><span class="lbl">Inspection ends</span><input id="d-insp" placeholder="2026-06-20"></label>
+          <label class="field"><span class="lbl">Close date</span><input id="d-close" placeholder="2026-07-01"></label>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" onclick="saveDealTerms()">Save terms</button>
+          <a class="btn amber" id="d-pisheet" target="_blank" rel="noopener">Open PI sheet ↗</a>
+        </div>
+      </div>
+      <div>
+        <h3>Comps → ARV</h3>
+        <p style="color:var(--text-muted);font-size:13px;margin-top:0">Enter sold comps (one per line): <code>sqft, sale_price</code>. Computes ARV from the median $/sqft and drops in above.</p>
+        <textarea id="d-comps" style="min-height:120px;font-family:var(--mono,monospace)" placeholder="1750, 270000&#10;1900, 295000&#10;1700, 260000"></textarea>
+        <div class="btn-row"><button class="btn primary" onclick="runComps()">Compute ARV</button></div>
+        <div id="comps-out" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:8px">Matched buyers</h3>
+    <div class="btn-row" style="margin-bottom:8px">
+      <button class="btn ghost sm" onclick="loadMatches()">Refresh matches</button>
+      <button class="btn primary sm" onclick="genBlast()">Generate blast</button>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Match</th><th>Buyer</th><th>Contact</th><th>Budget</th><th>POF</th><th>Why</th></tr></thead>
+        <tbody id="match-body"></tbody>
+      </table>
+    </div>
+    <div id="blast-out"></div>
+  </div>
+</div>
+"""
+write("deals.html", page("deals", "Deals", deals_body))
 
 print("done")
