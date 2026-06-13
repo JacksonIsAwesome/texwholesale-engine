@@ -419,58 +419,108 @@ _DEMO_STREETS = [
     "1420 Magnolia St", "905 Birchwood Dr", "317 Lamar Ave", "2210 Oak Cliff Blvd",
     "88 Cedar Springs Rd", "640 Pecan Grove Ln", "1199 Bluebonnet Way",
     "5005 Greenville Ave", "742 Riverside Dr", "61 Mockingbird Ln",
+    "3318 Wisteria Ct", "407 Sunrise Blvd", "1821 Elm Fork Rd", "556 Tanglewood Dr",
+    "2903 Crestview Ln", "114 Holloway St", "775 Sycamore Pass", "4402 Ranch Rd",
+    "229 Cypress Mill Rd", "1067 Prairie Wind Dr", "3601 Alamo Heights Dr",
+    "840 Pecos Trail", "1530 Bowie St", "692 San Jacinto Ave", "2247 Travis Blvd",
+    "381 Congress Ct", "5119 Barton Creek Rd", "1744 Shoal Creek Blvd",
+    "933 Rundberg Ln", "2088 South Lamar St",
 ]
+
 _DEMO_SIGNALS = [
     ["tax-delinquent", "vacant"], ["foreclosure"], ["probate", "absentee-owner"],
     ["code-violation"], ["pre-foreclosure", "liens"], ["fsbo"], ["divorce"],
     ["expired-listing"], ["vacant", "absentee-owner"], ["auction"],
 ]
 
+_DEMO_FIRST_NAMES = [
+    "James", "Maria", "Robert", "Linda", "Michael", "Patricia", "William", "Barbara",
+    "David", "Susan", "Richard", "Karen", "Joseph", "Nancy", "Thomas", "Lisa",
+    "Charles", "Betty", "Christopher", "Margaret", "Daniel", "Sandra", "Paul", "Ashley",
+    "Mark", "Dorothy", "Donald", "Kimberly", "George", "Emily",
+]
+_DEMO_LAST_NAMES = [
+    "Carter", "Alvarez", "Nguyen", "Brooks", "Martinez", "Johnson", "Williams", "Davis",
+    "Garcia", "Wilson", "Anderson", "Taylor", "Thomas", "Jackson", "White", "Harris",
+    "Martin", "Thompson", "Moore", "Young", "Hall", "Walker", "Allen", "King",
+    "Wright", "Scott", "Green", "Baker", "Adams", "Nelson",
+]
+
+_DEMO_EMAIL_DOMAINS = [
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
+    "att.net", "sbcglobal.net", "comcast.net", "live.com", "me.com",
+]
+
+_DEMO_AREA_CODES = ["214", "972", "469", "817", "682", "512", "737", "210", "726", "830"]
+
 
 def _demo_leads(counties: Iterable[str]) -> list[tuple[dict, str]]:
     rows = []
     counties = list(counties) or DEFAULT_COUNTIES
+    used_addresses: set[str] = set()
+    street_pool = _DEMO_STREETS.copy()
+    lead_num = 0
     for i, county in enumerate(counties):
         city, state = COUNTY_SEAT.get(county, (county, "TX"))
         for j in range(3):
-            idx = (i * 3 + j) % len(_DEMO_STREETS)
-            sigs = _DEMO_SIGNALS[idx]
+            # Pick a unique street
+            idx = (i * 3 + j) % len(street_pool)
+            address = street_pool[idx]
+            # If already used, pick the next unused one
+            attempt = 0
+            while address in used_addresses and attempt < len(street_pool):
+                idx = (idx + 1) % len(street_pool)
+                address = street_pool[idx]
+                attempt += 1
+            used_addresses.add(address)
+
+            sigs = _DEMO_SIGNALS[(i * 3 + j) % len(_DEMO_SIGNALS)]
+            fn = _DEMO_FIRST_NAMES[lead_num % len(_DEMO_FIRST_NAMES)]
+            ln = _DEMO_LAST_NAMES[(lead_num * 7) % len(_DEMO_LAST_NAMES)]
+            owner_name = f"{fn} {ln}"
+            zip_seed = (i * 7 + j * 13 + 100) % 900
             rows.append(({
-                "address": _DEMO_STREETS[idx],
+                "address": address,
                 "city": city,
                 "state": state,
-                "zip_code": f"75{(idx*7) % 900:03d}",
+                "zip_code": f"75{zip_seed:03d}",
                 "county": county,
-                "owner_name": ["J. Carter", "M. Alvarez", "R. Nguyen", "T. Brooks"][idx % 4],
-                "est_value": 250000 + idx * 18500,
-                "est_equity_pct": 35 + (idx * 6) % 55,
+                "owner_name": owner_name,
+                "est_value": 180000 + (lead_num * 12700) % 320000,
+                "est_equity_pct": 20 + (lead_num * 9) % 65,
                 "tax_delinquent": "tax-delinquent" in sigs,
-                "days_on_market": (idx * 23) % 160,
+                "days_on_market": (lead_num * 17) % 180,
                 "distress_signals": sigs,
             }, "demo"))
+            lead_num += 1
     return rows
 
 
 def _demo_buyers(counties: Iterable[str]) -> list[tuple[dict, str]]:
-    names = [
-        ("Lone Star REI LLC", "LLC"), ("BlueSky Capital", "Inc"),
-        ("Hill Country Homes LP", "LP"), ("M. Alvarez", ""),
-        ("Trinity Buy-Box LLC", "LLC"), ("Gulf Coast Holdings", "Trust"),
+    buyers = [
+        ("Lone Star REI LLC", "LLC", "acquisitions@lonestarrei.com", "214-823-4471"),
+        ("BlueSky Capital Partners", "Inc", "deals@blueskycaptx.com", "972-558-1932"),
+        ("Hill Country Homes LP", "LP", "buy@hillcountryhomes.com", "512-447-8820"),
+        ("Marcus Alvarez", "", "malvarez.invest@gmail.com", "469-301-7754"),
+        ("Trinity Buy-Box LLC", "LLC", "info@trinitybuybox.com", "817-692-5513"),
+        ("Gulf Coast Holdings Trust", "Trust", "contact@gulfcoasthold.com", "210-774-3390"),
+        ("DFW Property Group", "LLC", "offers@dfwpropgroup.com", "214-934-6671"),
+        ("Pecos River Capital", "Inc", "invest@pecosrivercap.com", "682-451-8823"),
     ]
     rows = []
     counties = list(counties) or DEFAULT_COUNTIES
-    for i, (name, etype) in enumerate(names):
+    for i, (name, etype, email, phone) in enumerate(buyers):
         county = counties[i % len(counties)]
         city, state = COUNTY_SEAT.get(county, (county, "TX"))
         rows.append(({
             "name": name,
             "entity_type": etype,
-            "email": f"acq{i}@example.com",
-            "phone": f"214-555-0{100 + i}",
+            "email": email,
+            "phone": phone,
             "city": city,
             "state": state,
-            "budget_min": 100000,
-            "budget_max": 300000 + i * 40000,
-            "recent_cash_deals": (i % 4) + 1,
+            "budget_min": 80000 + i * 10000,
+            "budget_max": 280000 + i * 45000,
+            "recent_cash_deals": (i % 5) + 1,
         }, "demo"))
     return rows
