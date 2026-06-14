@@ -64,7 +64,9 @@ def page(slug, title, body, scripts=""):
 
 
 def write(name, html):
-    with open(os.path.join(OUT, name), "w", encoding="utf-8") as fh:
+    path = os.path.join(OUT, name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(html)
     print("wrote", name)
 
@@ -568,5 +570,43 @@ contracts_body = """
 <div class="note">No e-signature key (HelloSign/DocuSign) means contracts save as drafts to sign manually. Add a key later to send digitally.</div>
 """
 write("contracts.html", page("contracts", "Contracts", contracts_body))
+
+# ---------------- lead detail (subfolder; opened with ?id=) ----------------
+detail_body = """
+<div class="page-head">
+  <a href="/dashboard/leads.html" class="btn ghost sm">&larr; Back to leads</a>
+  <h1 id="ld-address" style="margin-top:10px">Loading…</h1>
+  <p id="ld-sub"></p>
+  <span class="src-pill" id="ld-quality"></span>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Lead details</h3>
+    <div id="ld-info" class="kv-grid"></div>
+  </div>
+  <div class="card">
+    <h3>Location</h3>
+    <div id="ld-map">Map appears here when a Google Maps key is configured.</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3>Neighborhood market</h3>
+  <div id="ld-market" class="grid cols-3"></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3>Recent comparable sales</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Address</th><th>Sold</th><th>Price</th><th>Sq Ft</th><th>Bd/Ba</th><th>Dist</th></tr></thead>
+      <tbody id="ld-comps"></tbody>
+    </table>
+  </div>
+  <div id="ld-comps-msg" class="note"></div>
+</div>
+"""
+write("leads/detail.html", page("detail", "Lead detail", detail_body))
 
 print("done")

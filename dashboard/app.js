@@ -200,15 +200,19 @@ async function renderLeads(status) {
       body.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="big">No leads yet</div>Run ingestion or import a CSV to populate this list.</div></td></tr>`;
       return;
     }
-    body.innerHTML = data.leads.map((l) => `
-      <tr>
+    body.innerHTML = data.leads.map((l) => {
+      const q = l.data_quality || "unverified";
+      const dot = q === "verified" ? "#34d399" : q === "invalid" ? "#f87171" : "#ffb020";
+      return `
+      <tr style="cursor:pointer" onclick="location.href='/dashboard/leads/detail.html?id=${l.id}'">
         <td><span class="score ${scoreClass(l.final_score)}">${l.final_score}</span></td>
-        <td><strong>${esc(l.address)}</strong><br><span style="color:var(--text-faint);font-size:12px">${esc(l.city)}, ${esc(l.state)} ${esc(l.zip_code)}</span></td>
+        <td><strong>${esc(l.address)}</strong> <span title="data: ${q}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dot}"></span><br><span style="color:var(--text-faint);font-size:12px">${esc(l.city)}, ${esc(l.state)} ${esc(l.zip_code)}</span></td>
         <td>${esc(l.owner_name) || "<span style='color:var(--text-faint)'>—</span>"}</td>
         <td>${(l.distress_signals || []).slice(0, 3).map((s) => `<span class="tag">${esc(s)}</span>`).join("") || "—"}</td>
         <td><span class="src-pill">${esc(l.source)}</span></td>
         <td>${l.est_value ? fmtMoney(l.est_value) : "—"}</td>
-      </tr>`).join("");
+      </tr>`;
+    }).join("");
   } catch (e) {
     toast("Couldn't load leads", e.message, "err");
   }
@@ -914,6 +918,92 @@ async function setContractStatus(id, status) {
 }
 
 /* =====================================================================
+   PAGE: lead detail (/dashboard/leads/detail.html?id=...)
+   ===================================================================== */
+async function pageDetail() {
+  const id = new URLSearchParams(location.search).get("id");
+  if (!id) { setText("ld-address", "No lead id"); return; }
+  let lead;
+  try {
+    lead = await API.get(`/api/leads/${id}`);
+  } catch (e) { setText("ld-address", "Lead not found"); return; }
+
+  setText("ld-address", lead.address || "(no address)");
+  setText("ld-sub", `${lead.city || ""}, ${lead.state || ""} ${lead.zip_code || ""} · ${lead.county || ""} County`);
+  const q = lead.data_quality || "unverified";
+  const qEl = document.getElementById("ld-quality");
+  qEl.textContent = "data: " + q;
+  qEl.style.color = q === "verified" ? "var(--green,#34d399)" : q === "invalid" ? "var(--red,#f87171)" : "var(--amber,#ffb020)";
+
+  // Info grid
+  const fmt = (v) => (v || v === 0 ? v : "—");
+  const info = [
+    ["Owner", fmt(lead.owner_name)], ["Phone", fmt(lead.owner_phone)], ["Email", fmt(lead.owner_email)],
+    ["Score", fmt(lead.final_score)], ["Status", fmt(lead.status)], ["Source", fmt(lead.source)],
+    ["Est. value", lead.est_value ? fmtMoney(lead.est_value) : "—"], ["Equity", lead.est_equity_pct ? lead.est_equity_pct + "%" : "—"],
+    ["Beds/Baths", `${fmt(lead.beds)}/${fmt(lead.baths)}`], ["Sq Ft", fmt(lead.sqft)], ["Year", fmt(lead.year_built)],
+    ["Occupancy", fmt(lead.occupancy)], ["ARV", lead.arv ? fmtMoney(lead.arv) : "—"], ["Signals", (lead.distress_signals || []).join(", ") || "—"],
+  ];
+  document.getElementById("ld-info").innerHTML = info.map(
+    ([k, v]) => `<div class="kv"><span>${k}</span><b>${esc(String(v))}</b></div>`).join("");
+
+  // Map (Static Maps API; hide gracefully without a key)
+  const mapHost = document.getElementById("ld-map");
+  if (lead.maps_key_present && (lead.latitude || lead.address)) {
+    const center = (lead.latitude && lead.longitude)
+      ? `${lead.latitude},${lead.longitude}`
+      : encodeURIComponent(`${lead.address}, ${lead.city}, ${lead.state} ${lead.zip_code}`);
+    const cfg = await fetch("/config.js").then((r) => r.text()).catch(() => "");
+    const m = cfg.match(/mapsKey:\s*"([^"]*)"/);
+    const key = m ? m[1] : "";
+    if (key) {
+      const url = `https://maps.googleapis.com/maps/api/staticmap?center=${center}&zoom=16&size=600x300&scale=2&markers=color:0x2dd4ff%7C${center}&key=${key}`;
+      mapHost.innerHTML = `<img src="${url}" alt="map" style="width:100%;border-radius:10px">`;
+    } else {
+      mapHost.innerHTML = `<div class="note">Add a Google Maps key in Settings to show the map.</div>`;
+    }
+  } else {
+    mapHost.innerHTML = `<div class="note">Add a Google Maps key in Settings to show the map.</div>`;
+  }
+
+  // Market widget (zip-scoped, county fallback)
+  try {
+    const ms = await API.get(`/api/market-stats?zip=${encodeURIComponent(lead.zip_code || "")}&county=${encodeURIComponent(lead.county || "")}`);
+    const market = Object.values(ms.markets || {})[0] || {};
+    const cards = [
+      ["Median price", market.median_price ? fmtMoney(market.median_price) : "—"],
+      ["Avg days on market", market.avg_dom != null ? market.avg_dom : "—"],
+      ["Inventory", market.inventory != null ? market.inventory : (market.inventory_trend || "—")],
+    ];
+    document.getElementById("ld-market").innerHTML = cards.map(
+      ([k, v]) => `<div class="num"><span>${k}</span><b>${esc(String(v))}</b></div>`).join("")
+      + `<div class="note" style="grid-column:1/-1">Source: ${esc(ms.source)} (${esc(ms.scope || "")})${ms.message ? " — " + esc(ms.message) : ""}</div>`;
+  } catch (e) {}
+
+  // Comps
+  const cb = document.getElementById("ld-comps");
+  try {
+    const cd = await API.get(`/api/leads/${id}/comps`);
+    if (!cd.count) {
+      cb.innerHTML = `<tr><td colspan="6"><div class="empty">No comps available</div></td></tr>`;
+      setText("ld-comps-msg", cd.message || "");
+    } else {
+      cb.innerHTML = cd.comps.map((c) => `<tr>
+        <td>${esc(c.address) || "—"}</td>
+        <td>${(c.sold_date || "").slice(0, 10) || "—"}</td>
+        <td>${c.sold_price ? fmtMoney(c.sold_price) : "—"}</td>
+        <td>${c.sqft || "—"}</td>
+        <td>${(c.beds || "—")}/${(c.baths || "—")}</td>
+        <td>${c.distance_mi ? c.distance_mi.toFixed(1) + " mi" : "—"}</td>
+      </tr>`).join("");
+      setText("ld-comps-msg", "");
+    }
+  } catch (e) {
+    cb.innerHTML = `<tr><td colspan="6"><div class="empty">Couldn't load comps</div></td></tr>`;
+  }
+}
+
+/* =====================================================================
    PAGE: boot
    ===================================================================== */
 document.addEventListener("DOMContentLoaded", () => {
@@ -922,6 +1012,7 @@ document.addEventListener("DOMContentLoaded", () => {
     home: pageHome, leads: pageLeads, buyers: pageBuyers, pipeline: pagePipeline,
     calculator: pageCalculator, templates: () => {}, import: pageImport, settings: pageSettings,
     followups: pageFollowups, deals: pageDeals, outreach: pageOutreach, contracts: pageContracts,
+    detail: pageDetail,
   };
   const fn = routes[document.body.dataset.page];
   if (fn) fn();

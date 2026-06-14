@@ -48,7 +48,7 @@ load_dotenv()
 # --------------------------------------------------------------------------- #
 
 APP_NAME = "TexWholesale Engine"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./texwholesale.db")
 # Railway/Heroku hand out postgres:// ; SQLAlchemy 2.x wants postgresql://
@@ -162,6 +162,9 @@ class Lead(Base):
     last_contacted_at = Column(DateTime, nullable=True)
     contact_count = Column(Integer, default=0)
 
+    # --- Data quality ------------------------------------------------------ #
+    data_quality = Column(String, default="unverified")  # verified | unverified | invalid
+
     def signals(self) -> list[str]:
         try:
             return json.loads(self.distress_signals or "[]")
@@ -231,6 +234,7 @@ class Lead(Base):
             "next_follow_up_date": self.next_follow_up_date.isoformat() if self.next_follow_up_date else None,
             "last_contacted_at": self.last_contacted_at.isoformat() if self.last_contacted_at else None,
             "contact_count": self.contact_count or 0,
+            "data_quality": self.data_quality or "unverified",
             # computed countdowns
             "days_until_follow_up": _days_until(self.next_follow_up_date),
             "days_to_inspection_end": _days_until(self.inspection_end_date),
@@ -1292,6 +1296,63 @@ def validate_address(d: AddressInput):
         return {"validated": False, "note": f"USPS request failed: {exc}", "address": d.model_dump()}
 
 
+# ----- Data-quality gates -------------------------------------------------- #
+
+_US_STATES = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS",
+    "KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
+    "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV",
+    "WI","WY","DC",
+}
+
+
+def valid_state_zip(state: str, zip_code: str) -> bool:
+    """Reject obviously-bad records: state must be a real US state, zip exactly 5 digits."""
+    st = (state or "").strip().upper()
+    zp = (zip_code or "").strip()
+    if st not in _US_STATES:
+        return False
+    if not (len(zp) == 5 and zp.isdigit()):
+        return False
+    return True
+
+
+def usps_check(address: str, city: str, state: str, zip_code: str) -> str:
+    """
+    Returns one of: 'verified' | 'unverified' | 'invalid'.
+    - No USPS key configured -> 'unverified' (allowed to save).
+    - USPS says bad -> 'invalid'.
+    - USPS says good -> 'verified'.
+    """
+    if not USPS_USER_ID:
+        return "unverified"
+    xml = (
+        f'<AddressValidateRequest USERID="{USPS_USER_ID}">'
+        f"<Revision>1</Revision>"
+        f'<Address ID="0">'
+        f"<Address1></Address1>"
+        f"<Address2>{address}</Address2>"
+        f"<City>{city}</City>"
+        f"<State>{state}</State>"
+        f"<Zip5>{zip_code}</Zip5>"
+        f"<Zip4></Zip4>"
+        f"</Address></AddressValidateRequest>"
+    )
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+            resp = client.get(
+                "https://secure.shippingapis.com/ShippingAPI.dll",
+                params={"API": "Verify", "XML": xml},
+            )
+        body = resp.text
+        if "<Error>" in body or resp.status_code != 200:
+            return "invalid"
+        return "verified"
+    except httpx.HTTPError:
+        # Network failure on the validator shouldn't hard-drop a lead.
+        return "unverified"
+
+
 # ----- Skip trace ---------------------------------------------------------- #
 
 @app.post("/api/skip-trace/batch")
@@ -1364,13 +1425,29 @@ STATIC_MARKET_STATS = {
 
 
 @app.get("/api/market-stats")
-def market_stats():
+def market_stats(zip: str = "", county: str = ""):
     attom_key = os.getenv("ATTOM_API_KEY", "").strip()
+    # ZIP-scoped request (used by the lead detail widget).
+    if zip:
+        if attom_key:
+            live = source_engine.fetch_market_stats(attom_key, [zip])
+            if live:
+                return {"source": "attom", "scope": "zip", "zip": zip, "markets": live}
+        # Fall back to the lead's county-level static stats when we know the county.
+        if county and county in STATIC_MARKET_STATS:
+            return {"source": "static_fallback", "scope": "county", "zip": zip,
+                    "county": county, "markets": {county: STATIC_MARKET_STATS[county]}}
+        return {"source": "static_fallback", "scope": "metro", "zip": zip,
+                "markets": STATIC_MARKET_STATS,
+                "message": "No ZIP-level data available; showing metro fallback."}
+    if county and county in STATIC_MARKET_STATS:
+        return {"source": "static_fallback", "scope": "county", "county": county,
+                "markets": {county: STATIC_MARKET_STATS[county]}}
     if attom_key:
         live = source_engine.fetch_market_stats(attom_key, list(STATIC_MARKET_STATS.keys()))
         if live:
-            return {"source": "attom", "markets": live}
-    return {"source": "static_fallback", "markets": STATIC_MARKET_STATS}
+            return {"source": "attom", "scope": "metro", "markets": live}
+    return {"source": "static_fallback", "scope": "metro", "markets": STATIC_MARKET_STATS}
 
 
 # ----- Runs (source ingestion) --------------------------------------------- #
@@ -1393,15 +1470,34 @@ def trigger_run(payload: RunInput, db: Session = Depends(get_db)):
     used: list[str] = []
     lead_count = 0
     buyer_count = 0
+    rejected_sanity = 0
+    rejected_invalid = 0
 
     # Seller/deal sources
     for raw_lead, src_name in source_engine.collect_leads(counties, demo=DEMO_MODE):
+        state = raw_lead.get("state", "TX")
+        zip_code = raw_lead.get("zip_code", "")
+
+        # Hard sanity gate: never save clearly-wrong state/zip combos.
+        if not valid_state_zip(state, zip_code):
+            rejected_sanity += 1
+            continue
+
+        # USPS gate (skipped for intentionally-synthetic demo rows).
+        if src_name == "demo":
+            quality = "unverified"
+        else:
+            quality = usps_check(raw_lead.get("address", ""), raw_lead.get("city", ""), state, zip_code)
+            if quality == "invalid":
+                rejected_invalid += 1
+                continue  # USPS says the address is bad -> do not save
+
         base, reasons = rule_based_lead_score(raw_lead)
         lead = Lead(
             address=raw_lead.get("address", ""),
             city=raw_lead.get("city", ""),
-            state=raw_lead.get("state", "TX"),
-            zip_code=raw_lead.get("zip_code", ""),
+            state=state,
+            zip_code=zip_code,
             county=raw_lead.get("county", ""),
             owner_name=raw_lead.get("owner_name", ""),
             owner_address=raw_lead.get("owner_address", ""),
@@ -1421,6 +1517,7 @@ def trigger_run(payload: RunInput, db: Session = Depends(get_db)):
             occupancy=raw_lead.get("occupancy", ""),
             latitude=raw_lead.get("latitude", 0.0),
             longitude=raw_lead.get("longitude", 0.0),
+            data_quality=quality,
             source=src_name,
             base_score=base,
             final_score=base,
@@ -1478,6 +1575,11 @@ def trigger_run(payload: RunInput, db: Session = Depends(get_db)):
     )
     if not used:
         run.notes += "No sources enabled — set ENABLE_* env vars or DEMO_MODE=true."
+    if rejected_sanity or rejected_invalid:
+        run.notes += f" Rejected {rejected_sanity} bad state/zip, {rejected_invalid} USPS-invalid."
+    attom_err = getattr(source_engine, "LAST_ATTOM_ERROR", "")
+    if attom_err:
+        run.notes += f" ATTOM: {attom_err[:300]}"
     db.commit()
     db.refresh(run)
     return run.to_dict()
@@ -1800,6 +1902,42 @@ def comps_endpoint(req: CompsRequest, db: Session = Depends(get_db)):
         result["saved_to_lead"] = lead.id
 
     return result
+
+
+@app.get("/api/leads/{lead_id}/comps")
+def lead_comps(lead_id: str, db: Session = Depends(get_db)):
+    """
+    Recent sold comps near the lead (same zip/county), straight from ATTOM.
+    No ATTOM data -> empty array with a message; never fabricated comps.
+    """
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+
+    pulled = source_engine.fetch_sales_comps(
+        postal_code=lead.zip_code, city=lead.city, state=lead.state,
+        latitude=lead.latitude or 0, longitude=lead.longitude or 0,
+        radius_mi=1.0, months_back=6, property_type=lead.property_type or "",
+    )
+    if not pulled:
+        err = getattr(source_engine, "LAST_ATTOM_ERROR", "")
+        msg = "ATTOM unavailable or returned no recent sales for this area."
+        if err:
+            msg += f" ({err[:160]})"
+        elif not os.getenv("ATTOM_API_KEY", "").strip():
+            msg = "ATTOM_API_KEY not configured — connect ATTOM to see live comps."
+        return {"lead_id": lead_id, "count": 0, "comps": [], "message": msg}
+
+    comps = [{
+        "address": c.get("address", ""),
+        "sold_price": c.get("sale_price", 0),
+        "sold_date": c.get("sale_date", ""),
+        "sqft": c.get("sqft", 0),
+        "beds": c.get("beds", 0),
+        "baths": c.get("baths", 0),
+        "distance_mi": c.get("distance_mi", 0),
+    } for c in pulled[:5]]
+    return {"lead_id": lead_id, "count": len(comps), "comps": comps}
 
 
 # ----- Follow-up tracking -------------------------------------------------- #

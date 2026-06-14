@@ -124,21 +124,30 @@ class ScraperStub(SourceAgent):
 # ATTOM agents (real API)
 # --------------------------------------------------------------------------- #
 
+LAST_ATTOM_ERROR: str = ""
+
+
 def _attom_get(path: str, params: dict) -> dict | None:
+    global LAST_ATTOM_ERROR
     if not ATTOM_KEY:
+        LAST_ATTOM_ERROR = "ATTOM_API_KEY not set"
         return None
     url = f"{ATTOM_BASE}{path}"
     headers = {"Accept": "application/json", "apikey": ATTOM_KEY}
+    # Log the full outgoing request (key is in headers, not logged).
+    _log("attom", f"GET {url} params={params}")
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             resp = client.get(url, params=params, headers=headers)
-        if resp.status_code in (403, 404):
-            _log("attom", f"{path} -> {resp.status_code}; skipping")
+        if resp.status_code != 200:
+            LAST_ATTOM_ERROR = f"{path} -> HTTP {resp.status_code}: {resp.text[:200]}"
+            _log("attom", LAST_ATTOM_ERROR)
             return None
-        resp.raise_for_status()
+        LAST_ATTOM_ERROR = ""
         return resp.json()
     except (httpx.HTTPError, ValueError) as exc:
-        _log("attom", f"{path} request failed: {exc}")
+        LAST_ATTOM_ERROR = f"{path} request failed: {exc}"
+        _log("attom", LAST_ATTOM_ERROR)
         return None
 
 

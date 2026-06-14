@@ -190,6 +190,26 @@ screening number, not gospel, especially in mixed neighborhoods where $/sqft var
 > by the TCPA, with penalties of $500–$1,500 *per message*. Drafting while you send from your own
 > inbox keeps you out of that entirely.
 
+## Data quality, comps & market context (v1.4)
+
+- **Hard sanity gate on ingestion** — every lead must have a real US state and a 5-digit ZIP or
+  it's rejected before saving (count recorded in the run). ATTOM calls now log their full URL and
+  params, and on any non-200/failure the error is captured and written to the run notes — the app
+  never silently inserts placeholder rows when a source fails.
+- **`data_quality` on every lead** — `verified` (USPS confirmed), `unverified` (no USPS key, saved
+  anyway), or `invalid` (USPS rejected — not saved). Shown as a colored dot in the leads table and
+  a badge on the detail page.
+- **`GET /api/leads/{id}/comps`** — 3–5 recent sold comps near the lead from ATTOM; empty array
+  with a clear message when ATTOM isn't reachable. Never fabricated.
+- **`GET /api/market-stats?zip=&county=`** — ZIP-scoped snapshot when ATTOM supports it, otherwise
+  county-level static fallback.
+- **Lead detail page** — `/dashboard/leads/detail.html?id=...`: full lead info, the comps table, a
+  Google Static Maps embed (hidden gracefully without a key), and a neighborhood market widget.
+  Click any row in the leads table to open it.
+
+> DEMO_MODE remains a separate, explicit opt-in. The data-quality gates apply to real ATTOM/CSV
+> ingestion; demo rows are marked `unverified`.
+
 ### Database migrations
 
 New columns are added automatically on boot by `ensure_schema()` (it only ever *adds* missing

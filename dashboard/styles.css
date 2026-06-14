@@ -446,3 +446,13 @@ tbody tr:last-child td { border-bottom: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* ---- lead detail (v1.4) ---- */
+.kv-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 18px; }
+.kv { border-bottom: 1px solid rgba(148,163,184,.12); padding: 6px 0; }
+.kv span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-faint, #64748b); }
+.kv b { font-size: 14.5px; }
+.num { background: rgba(15,23,42,.4); border: 1px solid rgba(148,163,184,.15); border-radius: 10px; padding: 13px 14px; }
+.num span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-faint, #64748b); }
+.num b { font-size: 19px; }
+@media (max-width: 640px) { .kv-grid { grid-template-columns: 1fr; } }
